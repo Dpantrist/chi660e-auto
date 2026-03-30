@@ -65,9 +65,10 @@ def list_desktop_windows() -> list[WindowInfo]:
     return [build_window_info(win) for win in windows]
 
 
-def find_target_window(keyword: str) -> LinkResult:
+def find_target_window(keyword: str, windows: list[WindowInfo] | None = None) -> LinkResult:
     keyword_lower = keyword.lower()
-    windows = list_desktop_windows()
+    if windows is None:
+        windows = list_desktop_windows()
     if not windows:
         raise WindowNotFoundError("No desktop windows were detected by MaaFramework Toolkit.")
 

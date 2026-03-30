@@ -106,7 +106,7 @@ def bootstrap_app() -> RuntimeContext:
         desktop_windows = list_desktop_windows()
         _log_desktop_windows(logger, desktop_windows)
 
-        link_result = find_target_window(WINDOW_KEYWORD)
+        link_result = find_target_window(WINDOW_KEYWORD, windows=desktop_windows)
         context.linked_window = link_result.selected_window
         context.status.stage = "window_search"
         append_event(
