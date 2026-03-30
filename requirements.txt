@@ -1,0 +1,6 @@
+# Runtime dependencies for the initialization skeleton only.
+numpy
+opencv-python
+
+# Install MaaFramework Python bindings according to the local MaaFW environment.
+# The binding package name/path is intentionally not guessed here.
