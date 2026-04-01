@@ -5,9 +5,10 @@ from pathlib import Path
 from typing import Any
 
 from app.bootstrap import bootstrap_app
-from app.constants import MAIN_WINDOW_TITLE_CANDIDATES
+from app.constants import MAIN_WINDOW_TITLE_CANDIDATES, WINDOW_KEYWORD
 from app.controller_manager import capture_once, connect_controller, create_controller
 from app.cv_config import CVFrontHalfConfig, get_default_cv_front_half_config
+from app.dto import WindowSession
 from app.errors import Chi660eAutoError, WindowNotFoundError
 from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
@@ -23,7 +24,7 @@ TECHNIQUE_WINDOW_KEYWORD = "Electrochemical Techniques"
 CV_PARAM_WINDOW_KEYWORD = "Cyclic Voltammetry Parameters"
 
 WINDOW_WAIT_TIMEOUT_SEC = 6.0
-WINDOW_WAIT_INTERVAL_SEC = 0.5
+WINDOW_WAIT_INTERVAL_SEC = 0.15
 WINDOW_PRESET_VERIFY_RETRIES = 3
 
 
@@ -111,6 +112,58 @@ def _record_preset_history(context: RuntimeContext, title: str, history: list[di
             _log_window_preset_verify(context, detail.get("keyword", context.window_keyword or ""), detail)
 
 
+def _register_session(
+    context: RuntimeContext,
+    keyword: str,
+    linked_window,
+    controller,
+    tasker,
+) -> WindowSession:
+    session = WindowSession(
+        keyword=keyword,
+        hwnd=linked_window.hwnd,
+        linked_window=linked_window,
+        controller=controller,
+        tasker=tasker,
+    )
+    context.sessions[keyword] = session
+    return session
+
+
+def _get_cached_session(context: RuntimeContext, keyword: str) -> WindowSession | None:
+    return context.sessions.get(keyword)
+
+
+def _activate_session(context: RuntimeContext, keyword: str) -> WindowSession:
+    session = context.sessions[keyword]
+    context.controller = session.controller
+    context.tasker = session.tasker
+    context.linked_window = session.linked_window
+    context.window_keyword = session.keyword
+    context.active_session_key = keyword
+    context.logger.info("Activating window session: keyword=%s", keyword)
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "window_session_activated",
+            {
+                "keyword": keyword,
+                "title": session.linked_window.title,
+            },
+        )
+    return session
+
+
+def _session_exists_on_desktop(session: WindowSession) -> bool:
+    windows = list_desktop_windows()
+    for window in windows:
+        if window.hwnd == session.hwnd:
+            session.linked_window = window
+            session.hwnd = window.hwnd
+            return True
+    return False
+
+
 def _connect_window_with_preset_verification(
     context: RuntimeContext,
     matched_windows,
@@ -160,6 +213,80 @@ def _connect_window_with_preset_verification(
     raise Chi660eAutoError("Failed to connect any matched window.")
 
 
+def _repair_cached_session(context: RuntimeContext, session: WindowSession) -> bool:
+    def _reuse_or_recreate_controller(hwnd: int):
+        if session.controller is not None:
+            try:
+                connect_controller(session.controller)
+                return session.controller
+            except Exception:
+                pass
+        return _create_connected_controller(hwnd)
+
+    enforce_result = enforce_window_preset_until_verified(
+        session.hwnd,
+        session.keyword,
+        _reuse_or_recreate_controller,
+        logger=context.logger,
+        retries=WINDOW_PRESET_VERIFY_RETRIES,
+    )
+    _record_preset_history(context, session.linked_window.title, enforce_result.get("history") or [])
+
+    if enforce_result.get("preset_exists") and not enforce_result.get("verified"):
+        return False
+
+    controller = enforce_result.get("controller")
+    if controller is None:
+        return False
+
+    rebuilt = controller is not session.controller or session.tasker is None
+    session.controller = controller
+    if rebuilt:
+        tasker = create_tasker()
+        bind_tasker(tasker, context.resource, controller)
+        session.tasker = tasker
+    session.hwnd = session.linked_window.hwnd
+    context.logger.info("Window session repaired: keyword=%s rebuilt=%s", session.keyword, rebuilt)
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "window_session_repaired",
+            {
+                "keyword": session.keyword,
+                "title": session.linked_window.title,
+                "rebuilt": rebuilt,
+                "verified": enforce_result.get("verified"),
+            },
+        )
+    return True
+
+
+def _session_still_usable(context: RuntimeContext, session: WindowSession) -> bool:
+    if session.controller is None or session.tasker is None:
+        return False
+    if not _session_exists_on_desktop(session):
+        return False
+
+    verify_result = verify_window_preset_applied(
+        session.hwnd,
+        session.controller,
+        session.keyword,
+        logger=context.logger,
+    )
+    _log_window_preset_verify(context, session.keyword, verify_result)
+    _append_window_preset_event(
+        context,
+        "window_preset_verify",
+        session.keyword,
+        session.linked_window.title,
+        0,
+        verify_result,
+    )
+    if not verify_result.get("preset_exists") or verify_result.get("verified"):
+        return True
+    return _repair_cached_session(context, session)
+
+
 def _ensure_context_window_ready_for_task(context: RuntimeContext) -> None:
     if context.linked_window is None or context.window_keyword is None:
         return
@@ -198,27 +325,22 @@ def _ensure_context_window_ready_for_task(context: RuntimeContext) -> None:
         level="ERROR",
     )
 
-    enforce_result = enforce_window_preset_until_verified(
-        context.linked_window.hwnd,
-        context.window_keyword,
-        _create_connected_controller,
-        logger=context.logger,
-        retries=WINDOW_PRESET_VERIFY_RETRIES,
-    )
-    _record_preset_history(context, context.linked_window.title, enforce_result.get("history") or [])
+    session = _get_cached_session(context, context.window_keyword)
+    if session is None:
+        session = _register_session(
+            context,
+            context.window_keyword,
+            context.linked_window,
+            context.controller,
+            context.tasker,
+        )
 
-    if enforce_result.get("preset_exists") and not enforce_result.get("verified"):
+    if not _repair_cached_session(context, session):
         raise Chi660eAutoError(
             f"Window preset verification failed before task for {context.window_keyword!r}."
         )
 
-    controller = enforce_result.get("controller")
-    if controller is None:
-        controller = _create_connected_controller(context.linked_window.hwnd)
-    tasker = create_tasker()
-    bind_tasker(tasker, context.resource, controller)
-    context.controller = controller
-    context.tasker = tasker
+    _activate_session(context, session.keyword)
 
 
 def _task_succeeded(job: Any, detail: Any) -> bool:
@@ -290,9 +412,36 @@ def _bind_context_to_window(
     keyword: str | list[str],
     capture_name: str,
 ) -> RuntimeContext:
+    preset_keyword = _canonical_window_keyword(keyword)
+    cached_session = _get_cached_session(context, preset_keyword)
+    if cached_session is not None:
+        if _session_still_usable(context, cached_session):
+            context.logger.info("Reusing cached window session: keyword=%s", preset_keyword)
+            _activate_session(context, preset_keyword)
+            if context.replay_record is not None:
+                append_event(
+                    context.replay_record,
+                    "window_session_reused",
+                    {
+                        "keyword": preset_keyword,
+                        "title": cached_session.linked_window.title,
+                    },
+                )
+            _save_step_capture(context, capture_name)
+            return context
+        context.logger.info("Cached session invalid, fallback to rebind: keyword=%s", preset_keyword)
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "window_session_fallback_rebind",
+                {
+                    "keyword": preset_keyword,
+                    "title": cached_session.linked_window.title,
+                },
+            )
+
     link_result = _wait_for_window(keyword)
     context.logger.info("Binding runtime context to window: %s", link_result.selected_window.title)
-    preset_keyword = _canonical_window_keyword(keyword)
     selected_window, controller = _connect_window_with_preset_verification(
         context,
         link_result.matched_windows,
@@ -303,9 +452,8 @@ def _bind_context_to_window(
 
     tasker = create_tasker()
     bind_tasker(tasker, context.resource, controller)
-    context.tasker = tasker
-    context.linked_window = selected_window
-    context.window_keyword = preset_keyword
+    _register_session(context, preset_keyword, selected_window, controller, tasker)
+    _activate_session(context, preset_keyword)
 
     if context.replay_record is not None:
         append_event(
@@ -352,13 +500,44 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
         _bind_context_to_window(context, TECHNIQUE_WINDOW_KEYWORD, "cv_front_half_techniques_window")
         _post_task(context, "Techniques_SelectCVAndConfirm")
 
-        try:
-            _bind_context_to_window(context, CV_PARAM_WINDOW_KEYWORD, "cv_front_half_cv_window_initial")
-        except WindowNotFoundError:
+        main_session = _get_cached_session(context, WINDOW_KEYWORD)
+        fast_switched = False
+        if main_session is not None and _session_still_usable(context, main_session):
+            _activate_session(context, WINDOW_KEYWORD)
+            context.logger.info("Fast switch to cached main session succeeded.")
+            if context.replay_record is not None:
+                append_event(
+                    context.replay_record,
+                    "window_session_reused",
+                    {
+                        "keyword": WINDOW_KEYWORD,
+                        "title": main_session.linked_window.title,
+                        "stage": "main_fast_switch",
+                    },
+                )
+            fast_switched = True
+        if not fast_switched:
             _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_rebound")
             _post_task(context, "Main_ClickParameters")
-            _save_step_capture(context, "cv_front_half_main_after_parameters")
-            _bind_context_to_window(context, CV_PARAM_WINDOW_KEYWORD, "cv_front_half_cv_window_retry")
+        else:
+            try:
+                _post_task(context, "Main_ClickParameters")
+            except Exception:
+                context.logger.info("Cached main session post failed, fallback to rebind.")
+                if context.replay_record is not None:
+                    append_event(
+                        context.replay_record,
+                        "window_session_fallback_rebind",
+                        {
+                            "keyword": WINDOW_KEYWORD,
+                            "stage": "main_post_task_retry",
+                        },
+                    )
+                _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_rebound")
+                _post_task(context, "Main_ClickParameters")
+
+        _save_step_capture(context, "cv_front_half_main_after_parameters")
+        _bind_context_to_window(context, CV_PARAM_WINDOW_KEYWORD, "cv_front_half_cv_window_initial")
 
         _post_task(context, "CV_FrontHalf_FillAndConfirm", _build_cv_override(config))
         _wait_for_window_close(CV_PARAM_WINDOW_KEYWORD)

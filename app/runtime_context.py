@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.dto import AppStatus, ReplayRecord, WindowInfo
+from app.dto import AppStatus, ReplayRecord, WindowInfo, WindowSession
 
 
 @dataclass(slots=True)
@@ -16,6 +16,8 @@ class RuntimeContext:
     tasker: Any = None
     linked_window: WindowInfo | None = None
     window_keyword: str | None = None
+    sessions: dict[str, WindowSession] = field(default_factory=dict)
+    active_session_key: str | None = None
     replay_dir: Path | None = None
     status: AppStatus = field(default_factory=AppStatus)
     replay_record: ReplayRecord | None = None

@@ -11,7 +11,7 @@ from app.constants import (
 )
 from app.controller_manager import capture_once, connect_controller, create_controller
 from app.controller_manager import get_cached_image_safe
-from app.dto import AppStatus, WindowInfo
+from app.dto import AppStatus, WindowInfo, WindowSession
 from app.errors import Chi660eAutoError
 from app.logging_utils import get_logger, init_logging
 from app.paths import BASE_DIR, LOG_FILE, MAA_LOG_FILE, RESOURCE_DIR, ensure_project_dirs
@@ -256,6 +256,14 @@ def bootstrap_app() -> RuntimeContext:
         tasker = create_tasker()
         context.tasker = tasker
         bind_tasker(tasker, resource, controller)
+        context.sessions[WINDOW_KEYWORD] = WindowSession(
+            keyword=WINDOW_KEYWORD,
+            hwnd=selected_window.hwnd,
+            linked_window=selected_window,
+            controller=controller,
+            tasker=tasker,
+        )
+        context.active_session_key = WINDOW_KEYWORD
         context.status.stage = "tasker_bound"
         append_event(replay_record, "tasker_bound", {"tasker_inited": bool(getattr(tasker, "inited", False))})
 

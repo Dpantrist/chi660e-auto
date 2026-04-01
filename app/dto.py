@@ -49,6 +49,15 @@ class ReplayRecord:
 
 
 @dataclass(slots=True)
+class WindowSession:
+    keyword: str
+    hwnd: int
+    linked_window: WindowInfo
+    controller: object
+    tasker: object
+
+
+@dataclass(slots=True)
 class AppStatus:
     stage: str = "created"
     ready: bool = False
