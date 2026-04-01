@@ -7,6 +7,7 @@ from typing import Any
 from app.bootstrap import bootstrap_app
 from app.constants import MAIN_WINDOW_TITLE_CANDIDATES, WINDOW_KEYWORD
 from app.controller_manager import capture_once, connect_controller, create_controller
+from app.cursor_guard import move_cursor_to_window_safe_corner
 from app.cv_config import CVFrontHalfConfig, get_default_cv_front_half_config
 from app.dto import WindowSession
 from app.errors import Chi660eAutoError, WindowNotFoundError
@@ -14,6 +15,7 @@ from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
 from app.screenshot_manager import save_debug_capture, save_replay_capture
 from app.tasker_manager import bind_tasker, create_tasker
+from app.template_click import template_center_click
 from app.window_linker import find_target_window, list_desktop_windows
 from app.window_preset import (
     enforce_window_preset_until_verified,
@@ -22,6 +24,7 @@ from app.window_preset import (
 
 TECHNIQUE_WINDOW_KEYWORD = "Electrochemical Techniques"
 CV_PARAM_WINDOW_KEYWORD = "Cyclic Voltammetry Parameters"
+MAIN_PARAMETERS_TEMPLATE = "main/main_btn_parameters_usable.png"
 
 WINDOW_WAIT_TIMEOUT_SEC = 6.0
 WINDOW_WAIT_INTERVAL_SEC = 0.15
@@ -356,11 +359,48 @@ def _task_succeeded(job: Any, detail: Any) -> bool:
     return True
 
 
+def _prepare_visual_task(context: RuntimeContext, entry: str) -> dict[str, Any]:
+    if context.linked_window is None:
+        result = {
+            "success": False,
+            "x": None,
+            "y": None,
+            "hwnd": None,
+            "reason": "linked_window_missing",
+        }
+    else:
+        result = move_cursor_to_window_safe_corner(
+            context.linked_window.hwnd,
+            logger=context.logger,
+        )
+
+    context.logger.info(
+        "Cursor relocated before task: entry=%s success=%s pos=(%s,%s)",
+        entry,
+        result.get("success"),
+        result.get("x"),
+        result.get("y"),
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "cursor_relocated_before_task",
+            {
+                "entry": entry,
+                "keyword": context.window_keyword,
+                "title": context.linked_window.title if context.linked_window is not None else None,
+                **result,
+            },
+        )
+    return result
+
+
 def _post_task(context: RuntimeContext, entry: str, pipeline_override: dict[str, Any] | None = None) -> Any:
     if context.tasker is None:
         raise Chi660eAutoError("Tasker is not initialized.")
 
     _ensure_context_window_ready_for_task(context)
+    _prepare_visual_task(context, entry)
     context.logger.info("Posting task: %s", entry)
     if context.replay_record is not None:
         append_event(
@@ -377,8 +417,316 @@ def _post_task(context: RuntimeContext, entry: str, pipeline_override: dict[str,
     return detail
 
 
-def _wait_for_window(keyword: str | list[str], timeout_sec: float = WINDOW_WAIT_TIMEOUT_SEC):
-    deadline = time.monotonic() + timeout_sec
+def _post_task_expect_window_with_recovery(
+    context: RuntimeContext,
+    click_entry: str,
+    expected_window_keyword: str | list[str],
+    replay_name: str,
+    max_attempts: int = 2,
+    initial_wait_timeout: float = 1.5,
+    retry_wait_timeout: float = 2.0,
+) -> RuntimeContext:
+    attempts = max(1, max_attempts)
+    last_error: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        _post_task(context, click_entry)
+        wait_timeout = initial_wait_timeout if attempt == 1 else retry_wait_timeout
+        try:
+            bound_context = _bind_context_to_window(
+                context,
+                expected_window_keyword,
+                replay_name,
+                timeout_sec=wait_timeout,
+            )
+            if attempt > 1:
+                context.logger.info(
+                    "Task recovery succeeded: entry=%s expected_window=%s attempt=%s",
+                    click_entry,
+                    expected_window_keyword,
+                    attempt,
+                )
+                if context.replay_record is not None:
+                    append_event(
+                        context.replay_record,
+                        "task_recovery_succeeded",
+                        {
+                            "entry": click_entry,
+                            "expected_window": expected_window_keyword,
+                            "attempt": attempt,
+                        },
+                    )
+            return bound_context
+        except WindowNotFoundError as exc:
+            last_error = exc
+            if attempt >= attempts:
+                context.logger.error(
+                    "Task recovery failed: entry=%s expected_window=%s attempt=%s",
+                    click_entry,
+                    expected_window_keyword,
+                    attempt,
+                )
+                if context.replay_record is not None:
+                    append_event(
+                        context.replay_record,
+                        "task_recovery_failed",
+                        {
+                            "entry": click_entry,
+                            "expected_window": expected_window_keyword,
+                            "attempt": attempt,
+                            "error": str(exc),
+                        },
+                        level="ERROR",
+                    )
+                raise
+
+            context.logger.warning(
+                "Task recovery triggered: entry=%s expected_window=%s attempt=%s",
+                click_entry,
+                expected_window_keyword,
+                attempt + 1,
+            )
+            if context.replay_record is not None:
+                append_event(
+                    context.replay_record,
+                    "task_recovery_triggered",
+                    {
+                        "entry": click_entry,
+                        "expected_window": expected_window_keyword,
+                        "attempt": attempt + 1,
+                        "error": str(exc),
+                    },
+                    level="WARNING",
+                )
+
+    if last_error is not None:
+        raise last_error
+    raise Chi660eAutoError(f"Failed to open expected window after task {click_entry!r}.")
+
+
+def _dynamic_click_parameters_and_wait(
+    context: RuntimeContext,
+    expected_window_keyword: str,
+    replay_name: str,
+    threshold: float = 0.8,
+    timeout_sec: float = 1.5,
+) -> RuntimeContext:
+    entry = "Main_ClickParameters"
+    template = MAIN_PARAMETERS_TEMPLATE
+
+    _ensure_context_window_ready_for_task(context)
+    _prepare_visual_task(context, entry)
+    context.logger.info(
+        "Dynamic template click start: entry=%s template=%s",
+        entry,
+        template,
+    )
+
+    try:
+        dynamic_result = template_center_click(
+            context.controller,
+            template,
+            threshold=threshold,
+            center_bias=(0, 0),
+        )
+    except Exception as exc:
+        context.logger.warning(
+            "Dynamic template click failed, fallback to pipeline recovery: entry=%s error=%s",
+            entry,
+            exc,
+        )
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "dynamic_template_click_failed",
+                {
+                    "entry": entry,
+                    "template": template,
+                    "error": str(exc),
+                    "reason": "exception",
+                },
+                level="WARNING",
+            )
+            append_event(
+                context.replay_record,
+                "dynamic_template_click_fallback",
+                {
+                    "entry": entry,
+                    "template": template,
+                    "reason": "exception",
+                },
+                level="WARNING",
+            )
+        return _post_task_expect_window_with_recovery(
+            context,
+            entry,
+            expected_window_keyword,
+            replay_name,
+            max_attempts=2,
+            initial_wait_timeout=1.5,
+            retry_wait_timeout=2.5,
+        )
+
+    context.logger.info(
+        "Dynamic template matched: entry=%s box=%s score=%.6f center=%s",
+        entry,
+        dynamic_result.get("box"),
+        dynamic_result.get("score", 0.0),
+        dynamic_result.get("center"),
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "dynamic_template_match",
+            {
+                "entry": entry,
+                "template": template,
+                "box": dynamic_result.get("box"),
+                "score": dynamic_result.get("score"),
+                "computed_center": dynamic_result.get("center"),
+                "mode": "dynamic_center_click",
+            },
+        )
+
+    if not dynamic_result.get("success"):
+        context.logger.warning(
+            "Dynamic template click failed, fallback to pipeline recovery: entry=%s score=%.6f",
+            entry,
+            dynamic_result.get("score", 0.0),
+        )
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "dynamic_template_click_failed",
+                {
+                    "entry": entry,
+                    "template": template,
+                    "box": dynamic_result.get("box"),
+                    "score": dynamic_result.get("score"),
+                    "computed_center": dynamic_result.get("center"),
+                    "reason": "threshold",
+                },
+                level="WARNING",
+            )
+            append_event(
+                context.replay_record,
+                "dynamic_template_click_fallback",
+                {
+                    "entry": entry,
+                    "template": template,
+                    "reason": "threshold",
+                },
+                level="WARNING",
+            )
+        return _post_task_expect_window_with_recovery(
+            context,
+            entry,
+            expected_window_keyword,
+            replay_name,
+            max_attempts=2,
+            initial_wait_timeout=1.5,
+            retry_wait_timeout=2.5,
+        )
+
+    context.logger.info(
+        "Dynamic template clicked: entry=%s click_point=%s",
+        entry,
+        dynamic_result.get("click_point"),
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "dynamic_template_click",
+            {
+                "entry": entry,
+                "template": template,
+                "box": dynamic_result.get("box"),
+                "score": dynamic_result.get("score"),
+                "computed_center": dynamic_result.get("center"),
+                "click_point": dynamic_result.get("click_point"),
+                "mode": "dynamic_center_click",
+            },
+        )
+
+    try:
+        bound_context = _bind_context_to_window(
+            context,
+            expected_window_keyword,
+            replay_name,
+            timeout_sec=timeout_sec,
+        )
+    except WindowNotFoundError as exc:
+        context.logger.warning(
+            "Dynamic template click failed, fallback to pipeline recovery: entry=%s error=%s",
+            entry,
+            exc,
+        )
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "dynamic_template_click_failed",
+                {
+                    "entry": entry,
+                    "template": template,
+                    "box": dynamic_result.get("box"),
+                    "score": dynamic_result.get("score"),
+                    "computed_center": dynamic_result.get("center"),
+                    "click_point": dynamic_result.get("click_point"),
+                    "error": str(exc),
+                    "reason": "no_window",
+                },
+                level="WARNING",
+            )
+            append_event(
+                context.replay_record,
+                "dynamic_template_click_fallback",
+                {
+                    "entry": entry,
+                    "template": template,
+                    "reason": "no_window",
+                },
+                level="WARNING",
+            )
+        return _post_task_expect_window_with_recovery(
+            context,
+            entry,
+            expected_window_keyword,
+            replay_name,
+            max_attempts=2,
+            initial_wait_timeout=1.5,
+            retry_wait_timeout=2.5,
+        )
+
+    context.logger.info(
+        "Dynamic template click succeeded: entry=%s expected_window=%s",
+        entry,
+        expected_window_keyword,
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "dynamic_template_click_succeeded",
+            {
+                "entry": entry,
+                "template": template,
+                "box": dynamic_result.get("box"),
+                "score": dynamic_result.get("score"),
+                "computed_center": dynamic_result.get("center"),
+                "click_point": dynamic_result.get("click_point"),
+                "expected_window": expected_window_keyword,
+            },
+        )
+    return bound_context
+
+
+def _wait_for_window(
+    keyword: str | list[str],
+    timeout_sec: float | None = None,
+    interval_sec: float | None = None,
+):
+    timeout = WINDOW_WAIT_TIMEOUT_SEC if timeout_sec is None else timeout_sec
+    interval = WINDOW_WAIT_INTERVAL_SEC if interval_sec is None else interval_sec
+    deadline = time.monotonic() + timeout
     last_error: Exception | None = None
 
     while time.monotonic() < deadline:
@@ -387,7 +735,7 @@ def _wait_for_window(keyword: str | list[str], timeout_sec: float = WINDOW_WAIT_
             return find_target_window(keyword, windows=windows)
         except WindowNotFoundError as exc:
             last_error = exc
-            time.sleep(WINDOW_WAIT_INTERVAL_SEC)
+            time.sleep(interval)
 
     raise WindowNotFoundError(
         f"Timed out waiting for window with keyword {keyword!r}."
@@ -411,6 +759,8 @@ def _bind_context_to_window(
     context: RuntimeContext,
     keyword: str | list[str],
     capture_name: str,
+    timeout_sec: float | None = None,
+    interval_sec: float | None = None,
 ) -> RuntimeContext:
     preset_keyword = _canonical_window_keyword(keyword)
     cached_session = _get_cached_session(context, preset_keyword)
@@ -440,7 +790,7 @@ def _bind_context_to_window(
                 },
             )
 
-    link_result = _wait_for_window(keyword)
+    link_result = _wait_for_window(keyword, timeout_sec=timeout_sec, interval_sec=interval_sec)
     context.logger.info("Binding runtime context to window: %s", link_result.selected_window.title)
     selected_window, controller = _connect_window_with_preset_verification(
         context,
@@ -494,10 +844,15 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
                 },
             )
 
-        _post_task(context, "Main_ClickTechnique")
-        _save_step_capture(context, "cv_front_half_main_after_technique")
-
-        _bind_context_to_window(context, TECHNIQUE_WINDOW_KEYWORD, "cv_front_half_techniques_window")
+        _post_task_expect_window_with_recovery(
+            context,
+            "Main_ClickTechnique",
+            TECHNIQUE_WINDOW_KEYWORD,
+            "cv_front_half_techniques_window",
+            max_attempts=2,
+            initial_wait_timeout=1.5,
+            retry_wait_timeout=2.0,
+        )
         _post_task(context, "Techniques_SelectCVAndConfirm")
 
         main_session = _get_cached_session(context, WINDOW_KEYWORD)
@@ -518,10 +873,13 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
             fast_switched = True
         if not fast_switched:
             _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_rebound")
-            _post_task(context, "Main_ClickParameters")
         else:
             try:
-                _post_task(context, "Main_ClickParameters")
+                _dynamic_click_parameters_and_wait(
+                    context,
+                    CV_PARAM_WINDOW_KEYWORD,
+                    "cv_front_half_cv_window_initial",
+                )
             except Exception:
                 context.logger.info("Cached main session post failed, fallback to rebind.")
                 if context.replay_record is not None:
@@ -534,10 +892,17 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
                         },
                     )
                 _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_rebound")
-                _post_task(context, "Main_ClickParameters")
-
-        _save_step_capture(context, "cv_front_half_main_after_parameters")
-        _bind_context_to_window(context, CV_PARAM_WINDOW_KEYWORD, "cv_front_half_cv_window_initial")
+                _dynamic_click_parameters_and_wait(
+                    context,
+                    CV_PARAM_WINDOW_KEYWORD,
+                    "cv_front_half_cv_window_initial",
+                )
+        if not fast_switched:
+            _dynamic_click_parameters_and_wait(
+                context,
+                CV_PARAM_WINDOW_KEYWORD,
+                "cv_front_half_cv_window_initial",
+            )
 
         _post_task(context, "CV_FrontHalf_FillAndConfirm", _build_cv_override(config))
         _wait_for_window_close(CV_PARAM_WINDOW_KEYWORD)

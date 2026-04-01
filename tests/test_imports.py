@@ -14,6 +14,7 @@ MODULES = [
     "app.window_preset",
     "app.controller_manager",
     "app.resource_loader",
+    "app.template_click",
     "app.task_runner",
     "app.tasker_manager",
     "app.screenshot_manager",
