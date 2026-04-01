@@ -1,1 +1,170 @@
-{}
+{
+  "CV_FocusHighPotential": {
+    "recognition": "TemplateMatch",
+    "template": "cv/cv_label_high_potential.png",
+    "action": "Click",
+    "target": true,
+    "target_offset": [105, -2, 95, 24],
+    "next": [
+      "CV_InputHighPotential"
+    ]
+  },
+  "CV_InputHighPotential": {
+    "recognition": "DirectHit",
+    "next": [
+      "CV_InputHighPotential_KeyDownCtrl"
+    ]
+  },
+  "CV_InputHighPotential_KeyDownCtrl": {
+    "recognition": "DirectHit",
+    "action": "KeyDown",
+    "key": 17,
+    "next": [
+      "CV_InputHighPotential_ClickA"
+    ]
+  },
+  "CV_InputHighPotential_ClickA": {
+    "recognition": "DirectHit",
+    "action": "ClickKey",
+    "key": 65,
+    "next": [
+      "CV_InputHighPotential_KeyUpCtrl"
+    ]
+  },
+  "CV_InputHighPotential_KeyUpCtrl": {
+    "recognition": "DirectHit",
+    "action": "KeyUp",
+    "key": 17,
+    "next": [
+      "CV_InputHighPotential_Delete"
+    ]
+  },
+  "CV_InputHighPotential_Delete": {
+    "recognition": "DirectHit",
+    "action": "ClickKey",
+    "key": 46,
+    "next": [
+      "CV_InputHighPotential_Apply"
+    ]
+  },
+  "CV_InputHighPotential_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "0.500",
+    "next": [
+      "CV_FocusScanRate"
+    ]
+  },
+  "CV_FocusScanRate": {
+    "recognition": "TemplateMatch",
+    "template": "cv/cv_label_scan_rate.png",
+    "action": "Click",
+    "target": true,
+    "target_offset": [105, -2, 95, 24],
+    "next": [
+      "CV_InputScanRate"
+    ]
+  },
+  "CV_InputScanRate": {
+    "recognition": "DirectHit",
+    "next": [
+      "CV_InputScanRate_KeyDownCtrl"
+    ]
+  },
+  "CV_InputScanRate_KeyDownCtrl": {
+    "recognition": "DirectHit",
+    "action": "KeyDown",
+    "key": 17,
+    "next": [
+      "CV_InputScanRate_ClickA"
+    ]
+  },
+  "CV_InputScanRate_ClickA": {
+    "recognition": "DirectHit",
+    "action": "ClickKey",
+    "key": 65,
+    "next": [
+      "CV_InputScanRate_KeyUpCtrl"
+    ]
+  },
+  "CV_InputScanRate_KeyUpCtrl": {
+    "recognition": "DirectHit",
+    "action": "KeyUp",
+    "key": 17,
+    "next": [
+      "CV_InputScanRate_Delete"
+    ]
+  },
+  "CV_InputScanRate_Delete": {
+    "recognition": "DirectHit",
+    "action": "ClickKey",
+    "key": 46,
+    "next": [
+      "CV_InputScanRate_Apply"
+    ]
+  },
+  "CV_InputScanRate_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "0.100",
+    "next": [
+      "CV_FocusSweepSegments"
+    ]
+  },
+  "CV_FocusSweepSegments": {
+    "recognition": "TemplateMatch",
+    "template": "cv/cv_label_sweep_segments.png",
+    "action": "Click",
+    "target": true,
+    "target_offset": [105, -2, 95, 24],
+    "next": [
+      "CV_InputSweepSegments"
+    ]
+  },
+  "CV_InputSweepSegments": {
+    "recognition": "DirectHit",
+    "next": [
+      "CV_InputSweepSegments_KeyDownCtrl"
+    ]
+  },
+  "CV_InputSweepSegments_KeyDownCtrl": {
+    "recognition": "DirectHit",
+    "action": "KeyDown",
+    "key": 17,
+    "next": [
+      "CV_InputSweepSegments_ClickA"
+    ]
+  },
+  "CV_InputSweepSegments_ClickA": {
+    "recognition": "DirectHit",
+    "action": "ClickKey",
+    "key": 65,
+    "next": [
+      "CV_InputSweepSegments_KeyUpCtrl"
+    ]
+  },
+  "CV_InputSweepSegments_KeyUpCtrl": {
+    "recognition": "DirectHit",
+    "action": "KeyUp",
+    "key": 17,
+    "next": [
+      "CV_InputSweepSegments_Delete"
+    ]
+  },
+  "CV_InputSweepSegments_Delete": {
+    "recognition": "DirectHit",
+    "action": "ClickKey",
+    "key": 46,
+    "next": [
+      "CV_InputSweepSegments_Apply"
+    ]
+  },
+  "CV_InputSweepSegments_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "2",
+    "next": [
+      "CV_ClickOK"
+    ]
+  }
+}

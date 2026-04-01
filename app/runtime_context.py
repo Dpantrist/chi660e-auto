@@ -15,6 +15,7 @@ class RuntimeContext:
     controller: Any = None
     tasker: Any = None
     linked_window: WindowInfo | None = None
+    window_keyword: str | None = None
     replay_dir: Path | None = None
     status: AppStatus = field(default_factory=AppStatus)
     replay_record: ReplayRecord | None = None

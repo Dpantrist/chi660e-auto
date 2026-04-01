@@ -1,1 +1,12 @@
-{}
+{
+  "Main_ClickTechnique": {
+    "recognition": "TemplateMatch",
+    "template": "main/main_btn_technique_usable.png",
+    "action": "Click"
+  },
+  "Main_ClickParameters": {
+    "recognition": "TemplateMatch",
+    "template": "main/main_btn_parameters_usable.png",
+    "action": "Click"
+  }
+}

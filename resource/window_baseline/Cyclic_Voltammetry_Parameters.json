@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-03-30T09:45:08+0800",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "python_version": "3.10.20",
+  "hwnd": 14421612,
+  "window_title": "Cyclic Voltammetry Parameters",
+  "window_class": "#32770",
+  "window_rect": {
+    "left": 213,
+    "top": 242,
+    "width": 350,
+    "height": 351
+  },
+  "client_rect": {
+    "width": 344,
+    "height": 322
+  },
+  "extended_frame_bounds": {
+    "left": 215,
+    "top": 242,
+    "width": 346,
+    "height": 349
+  },
+  "window_state": {
+    "maximized": false,
+    "minimized": false,
+    "visible": true
+  },
+  "window_style": {
+    "style_int": -1798831932,
+    "style_hex": "-0x6b37ff3c",
+    "exstyle_int": 65793,
+    "exstyle_hex": "0x10101"
+  },
+  "window_dpi": 96,
+  "capture": {
+    "screencap_method": "GDI",
+    "image_shape": [
+      720,
+      769,
+      3
+    ],
+    "resolution": [
+      344,
+      322
+    ]
+  },
+  "runtime_snapshot_saved_to": "D:\\MaaFW\\Code\\cv-test\\debug\\window_baseline\\Cyclic_Voltammetry_Parameters.json"
+}

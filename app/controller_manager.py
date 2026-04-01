@@ -106,12 +106,7 @@ def create_controller(hwnd: int):
     }
 
     try:
-        return win32_controller(hwnd=hwnd, **controller_kwargs)
-    except TypeError:
-        try:
-            return win32_controller(hWnd=hwnd, **controller_kwargs)
-        except Exception as exc:
-            raise ControllerInitError(f"Failed to create Win32Controller for hwnd={hwnd}.") from exc
+        return win32_controller(hWnd=hwnd, **controller_kwargs)
     except Exception as exc:
         raise ControllerInitError(f"Failed to create Win32Controller for hwnd={hwnd}.") from exc
 
@@ -127,6 +122,13 @@ def connect_controller(controller):
     return job
 
 
+def get_cached_image_safe(controller):
+    try:
+        return getattr(controller, "cached_image", None)
+    except Exception:
+        return None
+
+
 def capture_once(controller):
     try:
         job = controller.post_screencap().wait()
@@ -136,7 +138,7 @@ def capture_once(controller):
     if not getattr(job, "succeeded", False):
         raise ControllerInitError("Initial screencap validation failed.")
 
-    image = getattr(controller, "cached_image", None)
+    image = get_cached_image_safe(controller)
     if image is not None:
         return image
 
