@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import time
 from pathlib import Path
 
 from app.constants import DEFAULT_INPUT_METHOD, DEFAULT_SCREENCAP_METHOD
@@ -152,3 +153,72 @@ def capture_once(controller):
         raise ControllerInitError("Screencap succeeded but no image was returned.")
 
     return image
+
+
+def post_double_click(controller, x: int, y: int, interval_sec: float = 0.06) -> dict[str, object]:
+    point = (int(x), int(y))
+
+    try:
+        first_job = controller.post_click(*point).wait()
+    except Exception as exc:
+        raise ControllerInitError(
+            f"Controller first click failed for double click at point={point}."
+        ) from exc
+
+    if not getattr(first_job, "succeeded", False):
+        raise ControllerInitError(
+            f"Controller first click was rejected for double click at point={point}."
+        )
+
+    time.sleep(max(0.0, float(interval_sec)))
+
+    try:
+        second_job = controller.post_click(*point).wait()
+    except Exception as exc:
+        raise ControllerInitError(
+            f"Controller second click failed for double click at point={point}."
+        ) from exc
+
+    if not getattr(second_job, "succeeded", False):
+        raise ControllerInitError(
+            f"Controller second click was rejected for double click at point={point}."
+        )
+
+    return {
+        "success": True,
+        "point": point,
+        "interval_sec": float(interval_sec),
+    }
+
+
+def post_key_click(controller, keycode: int) -> dict[str, object]:
+    keycode = int(keycode)
+
+    try:
+        key_down_job = controller.post_key_down(keycode).wait()
+    except Exception as exc:
+        raise ControllerInitError(
+            f"Controller key_down failed for keycode={keycode}."
+        ) from exc
+
+    if not getattr(key_down_job, "succeeded", False):
+        raise ControllerInitError(
+            f"Controller key_down was rejected for keycode={keycode}."
+        )
+
+    try:
+        key_up_job = controller.post_key_up(keycode).wait()
+    except Exception as exc:
+        raise ControllerInitError(
+            f"Controller key_up failed for keycode={keycode}."
+        ) from exc
+
+    if not getattr(key_up_job, "succeeded", False):
+        raise ControllerInitError(
+            f"Controller key_up was rejected for keycode={keycode}."
+        )
+
+    return {
+        "success": True,
+        "keycode": keycode,
+    }

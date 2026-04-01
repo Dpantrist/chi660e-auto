@@ -6,7 +6,13 @@ from typing import Any
 
 from app.bootstrap import bootstrap_app
 from app.constants import MAIN_WINDOW_TITLE_CANDIDATES, WINDOW_KEYWORD
-from app.controller_manager import capture_once, connect_controller, create_controller
+from app.controller_manager import (
+    capture_once,
+    connect_controller,
+    create_controller,
+    post_double_click,
+    post_key_click,
+)
 from app.cursor_guard import move_cursor_to_window_safe_corner
 from app.cv_config import CVFrontHalfConfig, get_default_cv_front_half_config
 from app.dto import WindowSession
@@ -15,7 +21,8 @@ from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
 from app.screenshot_manager import save_debug_capture, save_replay_capture
 from app.tasker_manager import bind_tasker, create_tasker
-from app.template_click import template_center_click
+from app.template_click import VisualActionMode, VisualActionResult, run_visual_action
+from app.visual_action_specs import get_visual_action_spec
 from app.window_linker import find_target_window, list_desktop_windows
 from app.window_preset import (
     enforce_window_preset_until_verified,
@@ -24,7 +31,6 @@ from app.window_preset import (
 
 TECHNIQUE_WINDOW_KEYWORD = "Electrochemical Techniques"
 CV_PARAM_WINDOW_KEYWORD = "Cyclic Voltammetry Parameters"
-MAIN_PARAMETERS_TEMPLATE = "main/main_btn_parameters_usable.png"
 
 WINDOW_WAIT_TIMEOUT_SEC = 6.0
 WINDOW_WAIT_INTERVAL_SEC = 0.15
@@ -504,219 +510,253 @@ def _post_task_expect_window_with_recovery(
     raise Chi660eAutoError(f"Failed to open expected window after task {click_entry!r}.")
 
 
-def _dynamic_click_parameters_and_wait(
+def _append_visual_action_event(
     context: RuntimeContext,
-    expected_window_keyword: str,
-    replay_name: str,
-    threshold: float = 0.8,
-    timeout_sec: float = 1.5,
-) -> RuntimeContext:
-    entry = "Main_ClickParameters"
-    template = MAIN_PARAMETERS_TEMPLATE
+    event_name: str,
+    spec,
+    result: VisualActionResult | None = None,
+    extra: dict[str, Any] | None = None,
+    level: str = "INFO",
+) -> None:
+    if context.replay_record is None:
+        return
 
+    detail: dict[str, Any] = {
+        "name": spec.name,
+        "mode": spec.mode.value,
+        "template": spec.template,
+    }
+    if result is not None:
+        detail.update(
+            {
+                "matched": result.matched,
+                "clicked": result.clicked,
+                "box": result.box,
+                "score": result.score,
+                "click_point": result.click_point,
+                "computed_center": result.computed_center,
+                "relative_roi": result.relative_roi,
+                "computed_rect": result.computed_rect,
+                "attempt": result.attempt,
+                "error": result.error,
+            }
+        )
+    if extra:
+        detail.update(extra)
+
+    append_event(context.replay_record, event_name, detail, level=level)
+
+
+def _run_visual_action_once(context: RuntimeContext, spec_name: str) -> VisualActionResult:
+    spec = get_visual_action_spec(spec_name)
     _ensure_context_window_ready_for_task(context)
-    _prepare_visual_task(context, entry)
-    context.logger.info(
-        "Dynamic template click start: entry=%s template=%s",
-        entry,
-        template,
-    )
-
-    try:
-        dynamic_result = template_center_click(
-            context.controller,
-            template,
-            threshold=threshold,
-            center_bias=(0, 0),
-        )
-    except Exception as exc:
-        context.logger.warning(
-            "Dynamic template click failed, fallback to pipeline recovery: entry=%s error=%s",
-            entry,
-            exc,
-        )
-        if context.replay_record is not None:
-            append_event(
-                context.replay_record,
-                "dynamic_template_click_failed",
-                {
-                    "entry": entry,
-                    "template": template,
-                    "error": str(exc),
-                    "reason": "exception",
-                },
-                level="WARNING",
-            )
-            append_event(
-                context.replay_record,
-                "dynamic_template_click_fallback",
-                {
-                    "entry": entry,
-                    "template": template,
-                    "reason": "exception",
-                },
-                level="WARNING",
-            )
-        return _post_task_expect_window_with_recovery(
-            context,
-            entry,
-            expected_window_keyword,
-            replay_name,
-            max_attempts=2,
-            initial_wait_timeout=1.5,
-            retry_wait_timeout=2.5,
-        )
+    _prepare_visual_task(context, spec.name)
 
     context.logger.info(
-        "Dynamic template matched: entry=%s box=%s score=%.6f center=%s",
-        entry,
-        dynamic_result.get("box"),
-        dynamic_result.get("score", 0.0),
-        dynamic_result.get("center"),
+        "Visual action start: name=%s mode=%s template=%s",
+        spec.name,
+        spec.mode.value,
+        spec.template,
     )
-    if context.replay_record is not None:
-        append_event(
-            context.replay_record,
-            "dynamic_template_match",
-            {
-                "entry": entry,
-                "template": template,
-                "box": dynamic_result.get("box"),
-                "score": dynamic_result.get("score"),
-                "computed_center": dynamic_result.get("center"),
-                "mode": "dynamic_center_click",
-            },
-        )
+    _append_visual_action_event(context, "visual_action_start", spec)
 
-    if not dynamic_result.get("success"):
-        context.logger.warning(
-            "Dynamic template click failed, fallback to pipeline recovery: entry=%s score=%.6f",
-            entry,
-            dynamic_result.get("score", 0.0),
+    result = run_visual_action(context.controller, spec, logger=context.logger)
+
+    if spec.mode == VisualActionMode.DETECT_ONLY:
+        context.logger.info(
+            "Visual action detect-only matched: name=%s matched=%s box=%s score=%.6f",
+            spec.name,
+            result.matched,
+            result.box,
+            result.score,
         )
-        if context.replay_record is not None:
-            append_event(
-                context.replay_record,
-                "dynamic_template_click_failed",
-                {
-                    "entry": entry,
-                    "template": template,
-                    "box": dynamic_result.get("box"),
-                    "score": dynamic_result.get("score"),
-                    "computed_center": dynamic_result.get("center"),
-                    "reason": "threshold",
-                },
-                level="WARNING",
-            )
-            append_event(
-                context.replay_record,
-                "dynamic_template_click_fallback",
-                {
-                    "entry": entry,
-                    "template": template,
-                    "reason": "threshold",
-                },
-                level="WARNING",
-            )
-        return _post_task_expect_window_with_recovery(
-            context,
-            entry,
-            expected_window_keyword,
-            replay_name,
-            max_attempts=2,
-            initial_wait_timeout=1.5,
-            retry_wait_timeout=2.5,
-        )
+        _append_visual_action_event(context, "visual_action_detect_only", spec, result)
+        if result.success:
+            context.logger.info("Visual action succeeded: name=%s", spec.name)
+            _append_visual_action_event(context, "visual_action_succeeded", spec, result)
+        return result
 
     context.logger.info(
-        "Dynamic template clicked: entry=%s click_point=%s",
-        entry,
-        dynamic_result.get("click_point"),
+        "Visual action matched: name=%s matched=%s box=%s score=%.6f",
+        spec.name,
+        result.matched,
+        result.box,
+        result.score,
     )
-    if context.replay_record is not None:
-        append_event(
-            context.replay_record,
-            "dynamic_template_click",
-            {
-                "entry": entry,
-                "template": template,
-                "box": dynamic_result.get("box"),
-                "score": dynamic_result.get("score"),
-                "computed_center": dynamic_result.get("center"),
-                "click_point": dynamic_result.get("click_point"),
-                "mode": "dynamic_center_click",
-            },
+    _append_visual_action_event(context, "visual_action_match", spec, result)
+
+    if result.computed_rect is not None:
+        context.logger.info(
+            "Visual action computed row rect: name=%s rect=%s",
+            spec.name,
+            result.computed_rect,
         )
 
-    try:
-        bound_context = _bind_context_to_window(
-            context,
-            expected_window_keyword,
-            replay_name,
-            timeout_sec=timeout_sec,
+    if result.clicked:
+        context.logger.info(
+            "Visual action clicked: name=%s click_point=%s",
+            spec.name,
+            result.click_point,
         )
-    except WindowNotFoundError as exc:
-        context.logger.warning(
-            "Dynamic template click failed, fallback to pipeline recovery: entry=%s error=%s",
-            entry,
-            exc,
-        )
-        if context.replay_record is not None:
-            append_event(
-                context.replay_record,
-                "dynamic_template_click_failed",
-                {
-                    "entry": entry,
-                    "template": template,
-                    "box": dynamic_result.get("box"),
-                    "score": dynamic_result.get("score"),
-                    "computed_center": dynamic_result.get("center"),
-                    "click_point": dynamic_result.get("click_point"),
-                    "error": str(exc),
-                    "reason": "no_window",
-                },
-                level="WARNING",
-            )
-            append_event(
-                context.replay_record,
-                "dynamic_template_click_fallback",
-                {
-                    "entry": entry,
-                    "template": template,
-                    "reason": "no_window",
-                },
-                level="WARNING",
-            )
-        return _post_task_expect_window_with_recovery(
-            context,
-            entry,
-            expected_window_keyword,
-            replay_name,
-            max_attempts=2,
-            initial_wait_timeout=1.5,
-            retry_wait_timeout=2.5,
-        )
+        _append_visual_action_event(context, "visual_action_click", spec, result)
+
+    if result.success and spec.expected_window_keyword is None:
+        context.logger.info("Visual action succeeded: name=%s", spec.name)
+        _append_visual_action_event(context, "visual_action_succeeded", spec, result)
+
+    return result
+
+
+def _run_visual_action_click(
+    context: RuntimeContext,
+    spec_name: str,
+) -> VisualActionResult:
+    result = _run_visual_action_once(context, spec_name)
+    if not result.success:
+        raise Chi660eAutoError(f"Visual action failed: {spec_name}")
+    return result
+
+
+def _locate_visual_action_point(
+    context: RuntimeContext,
+    spec_name: str,
+) -> VisualActionResult:
+    spec = get_visual_action_spec(spec_name)
+    _ensure_context_window_ready_for_task(context)
+    _prepare_visual_task(context, spec.name)
 
     context.logger.info(
-        "Dynamic template click succeeded: entry=%s expected_window=%s",
-        entry,
-        expected_window_keyword,
+        "Visual action locate start: name=%s mode=%s template=%s",
+        spec.name,
+        spec.mode.value,
+        spec.template,
     )
-    if context.replay_record is not None:
-        append_event(
-            context.replay_record,
-            "dynamic_template_click_succeeded",
-            {
-                "entry": entry,
-                "template": template,
-                "box": dynamic_result.get("box"),
-                "score": dynamic_result.get("score"),
-                "computed_center": dynamic_result.get("center"),
-                "click_point": dynamic_result.get("click_point"),
-                "expected_window": expected_window_keyword,
-            },
+    _append_visual_action_event(context, "visual_action_locate_start", spec)
+
+    result = run_visual_action(
+        context.controller,
+        spec,
+        logger=context.logger,
+        perform_click=False,
+    )
+
+    context.logger.info(
+        "Visual action locate matched: name=%s matched=%s box=%s score=%.6f",
+        spec.name,
+        result.matched,
+        result.box,
+        result.score,
+    )
+    _append_visual_action_event(context, "visual_action_locate_match", spec, result)
+
+    if result.computed_rect is not None:
+        context.logger.info(
+            "Visual action computed row rect: name=%s rect=%s",
+            spec.name,
+            result.computed_rect,
         )
-    return bound_context
+
+    if not result.success or result.click_point is None:
+        raise Chi660eAutoError(f"Visual action locate failed: {spec_name}")
+
+    context.logger.info(
+        "Visual action locate point: name=%s click_point=%s",
+        spec.name,
+        result.click_point,
+    )
+    _append_visual_action_event(context, "visual_action_locate_point", spec, result)
+    return result
+
+
+def _run_visual_action_expect_window_with_fallback(
+    context: RuntimeContext,
+    spec_name: str,
+    replay_name: str,
+    pipeline_fallback_entry: str,
+) -> RuntimeContext:
+    spec = get_visual_action_spec(spec_name)
+    last_error: Exception | None = None
+
+    for attempt in range(1, max(1, spec.max_attempts) + 1):
+        result = _run_visual_action_once(context, spec_name)
+        result.attempt = attempt
+
+        if not result.success:
+            last_error = Chi660eAutoError(f"Visual action failed: {spec_name}")
+        else:
+            timeout = spec.timeout_sec if attempt == 1 else spec.retry_timeout_sec
+            try:
+                bound_context = _bind_context_to_window(
+                    context,
+                    spec.expected_window_keyword or replay_name,
+                    replay_name,
+                    timeout_sec=timeout,
+                )
+                context.logger.info(
+                    "Visual action succeeded: name=%s expected_window=%s",
+                    spec.name,
+                    spec.expected_window_keyword,
+                )
+                _append_visual_action_event(
+                    context,
+                    "visual_action_succeeded",
+                    spec,
+                    result,
+                    {"expected_window": spec.expected_window_keyword},
+                )
+                return bound_context
+            except WindowNotFoundError as exc:
+                last_error = exc
+
+        if attempt < max(1, spec.max_attempts):
+            context.logger.warning(
+                "Visual action recovery triggered: name=%s attempt=%s",
+                spec.name,
+                attempt + 1,
+            )
+            _append_visual_action_event(
+                context,
+                "visual_action_recovery_triggered",
+                spec,
+                result,
+                {
+                    "attempt": attempt + 1,
+                    "expected_window": spec.expected_window_keyword,
+                    "error": str(last_error) if last_error is not None else None,
+                },
+                level="WARNING",
+            )
+
+    if not spec.allow_pipeline_fallback:
+        if last_error is not None:
+            raise last_error
+        raise Chi660eAutoError(f"Visual action failed: {spec_name}")
+
+    context.logger.warning(
+        "Visual action fallback to pipeline: name=%s entry=%s",
+        spec.name,
+        pipeline_fallback_entry,
+    )
+    _append_visual_action_event(
+        context,
+        "visual_action_fallback",
+        spec,
+        extra={
+            "pipeline_entry": pipeline_fallback_entry,
+            "expected_window": spec.expected_window_keyword,
+            "error": str(last_error) if last_error is not None else None,
+        },
+        level="WARNING",
+    )
+    return _post_task_expect_window_with_recovery(
+        context,
+        pipeline_fallback_entry,
+        spec.expected_window_keyword or replay_name,
+        replay_name,
+        max_attempts=max(1, spec.max_attempts),
+        initial_wait_timeout=spec.timeout_sec,
+        retry_wait_timeout=spec.retry_timeout_sec,
+    )
 
 
 def _wait_for_window(
@@ -820,12 +860,254 @@ def _bind_context_to_window(
     return context
 
 
-def _build_cv_override(config: CVFrontHalfConfig) -> dict[str, dict[str, str]]:
+def _run_techniques_select_cv_and_confirm(context: RuntimeContext) -> None:
+    selected_result = _run_visual_action_once(context, "Techniques_SelectCV_Selected_Check")
+    if selected_result.matched:
+        context.logger.info(
+            "Visual action skipped click: name=%s reason=already_selected",
+            "Techniques_SelectCV_Unselected_Click",
+        )
+        _append_visual_action_event(
+            context,
+            "visual_action_skip_click",
+            get_visual_action_spec("Techniques_SelectCV_Unselected_Click"),
+            selected_result,
+            {"reason": "already_selected"},
+        )
+    else:
+        click_result = _run_visual_action_once(context, "Techniques_SelectCV_Unselected_Click")
+        if not click_result.success:
+            context.logger.warning(
+                "Visual action fallback to pipeline: name=%s entry=%s",
+                "Techniques_SelectCV_Unselected_Click",
+                "Techniques_SelectCVAndConfirm",
+            )
+            _append_visual_action_event(
+                context,
+                "visual_action_fallback",
+                get_visual_action_spec("Techniques_SelectCV_Unselected_Click"),
+                click_result,
+                {"pipeline_entry": "Techniques_SelectCVAndConfirm"},
+                level="WARNING",
+            )
+            _post_task(context, "Techniques_SelectCVAndConfirm")
+            return
+
+        time.sleep(0.2)
+        selected_recheck = _run_visual_action_once(context, "Techniques_SelectCV_Selected_Check")
+        if not selected_recheck.matched:
+            context.logger.warning(
+                "Visual action fallback to pipeline: name=%s entry=%s",
+                "Techniques_SelectCV_Unselected_Click",
+                "Techniques_SelectCVAndConfirm",
+            )
+            _append_visual_action_event(
+                context,
+                "visual_action_fallback",
+                get_visual_action_spec("Techniques_SelectCV_Unselected_Click"),
+                selected_recheck,
+                {
+                    "pipeline_entry": "Techniques_SelectCVAndConfirm",
+                    "reason": "selection_recheck_failed",
+                },
+                level="WARNING",
+            )
+            _post_task(context, "Techniques_SelectCVAndConfirm")
+            return
+
+    ok_result = _run_visual_action_once(context, "Techniques_ClickOK")
+    if ok_result.success:
+        context.logger.info("Visual action succeeded: name=%s", "Techniques_ClickOK")
+        _append_visual_action_event(
+            context,
+            "visual_action_succeeded",
+            get_visual_action_spec("Techniques_ClickOK"),
+            ok_result,
+        )
+        return
+
+    context.logger.warning(
+        "Visual action fallback to pipeline: name=%s entry=%s",
+        "Techniques_ClickOK",
+        "Techniques_SelectCVAndConfirm",
+    )
+    _append_visual_action_event(
+        context,
+        "visual_action_fallback",
+        get_visual_action_spec("Techniques_ClickOK"),
+        ok_result,
+        {"pipeline_entry": "Techniques_SelectCVAndConfirm"},
+        level="WARNING",
+    )
+    _post_task(context, "Techniques_SelectCVAndConfirm")
+
+
+def _build_node_override(node_name: str, **fields: Any) -> dict[str, dict[str, Any]]:
     return {
-        "CV_InputHighPotential_Apply": {"input_text": config.high_potential},
-        "CV_InputScanRate_Apply": {"input_text": config.scan_rate},
-        "CV_InputSweepSegments_Apply": {"input_text": config.sweep_segments},
+        node_name: fields,
     }
+
+
+def _double_click_focused_input(
+    context: RuntimeContext,
+    name: str,
+    click_point: tuple[int, int],
+) -> dict[str, Any]:
+    context.logger.info("Input double-click start: name=%s point=%s", name, click_point)
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "input_double_click_start",
+            {
+                "name": name,
+                "click_point": click_point,
+            },
+        )
+
+    try:
+        result = post_double_click(context.controller, click_point[0], click_point[1])
+    except Exception as exc:
+        context.logger.warning(
+            "Input double-click failed: name=%s point=%s error=%s",
+            name,
+            click_point,
+            exc,
+        )
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "input_double_click_failed",
+                {
+                    "name": name,
+                    "click_point": click_point,
+                    "error": str(exc),
+                },
+                level="ERROR",
+            )
+        raise
+
+    context.logger.info("Input double-click succeeded: name=%s point=%s", name, click_point)
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "input_double_click_succeeded",
+            {
+                "name": name,
+                "click_point": click_point,
+                "interval_sec": result.get("interval_sec"),
+                "success": result.get("success"),
+            },
+        )
+    return result
+
+
+def _delete_immediately_after_double_click(context: RuntimeContext, name: str) -> dict[str, Any]:
+    keycode = 46
+    context.logger.info("Input immediate delete start: name=%s keycode=%s", name, keycode)
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "input_delete_immediate_start",
+            {
+                "name": name,
+                "keycode": keycode,
+            },
+        )
+
+    try:
+        result = post_key_click(context.controller, keycode)
+    except Exception as exc:
+        context.logger.warning(
+            "Input immediate delete failed: name=%s keycode=%s error=%s",
+            name,
+            keycode,
+            exc,
+        )
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "input_delete_immediate_failed",
+                {
+                    "name": name,
+                    "keycode": keycode,
+                    "error": str(exc),
+                },
+                level="ERROR",
+            )
+        raise
+
+    context.logger.info("Input immediate delete succeeded: name=%s keycode=%s", name, keycode)
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "input_delete_immediate_succeeded",
+            {
+                "name": name,
+                "keycode": result.get("keycode"),
+                "success": result.get("success"),
+            },
+        )
+    return result
+
+
+def _run_cv_input_field(
+    context: RuntimeContext,
+    focus_name: str,
+    apply_entry: str,
+    input_text: str,
+) -> None:
+    focus_result = _locate_visual_action_point(context, focus_name)
+    if focus_result.click_point is None:
+        raise Chi660eAutoError(f"Visual focus click point is missing for {focus_name}.")
+
+    context.logger.info("Input focus located: name=%s click_point=%s", focus_name, focus_result.click_point)
+    _double_click_focused_input(context, focus_name, focus_result.click_point)
+    _delete_immediately_after_double_click(context, focus_name)
+    _post_task(
+        context,
+        apply_entry,
+        _build_node_override(apply_entry, input_text=input_text, next=[]),
+    )
+
+
+def _run_cv_front_half_visual_form_once(
+    context: RuntimeContext,
+    config: CVFrontHalfConfig,
+) -> None:
+    _run_cv_input_field(
+        context,
+        "CV_FocusHighPotential",
+        "CV_InputHighPotential_Apply",
+        config.high_potential,
+    )
+    _run_cv_input_field(
+        context,
+        "CV_FocusScanRate",
+        "CV_InputScanRate_Apply",
+        config.scan_rate,
+    )
+    _run_cv_input_field(
+        context,
+        "CV_FocusSweepSegments",
+        "CV_InputSweepSegments_Apply",
+        config.sweep_segments,
+    )
+
+    ok_result = _run_visual_action_click(context, "CV_ClickOK")
+    _append_visual_action_event(
+        context,
+        "visual_action_succeeded",
+        get_visual_action_spec("CV_ClickOK"),
+        ok_result,
+    )
+    _wait_for_window_close(CV_PARAM_WINDOW_KEYWORD)
+
+
+def _run_cv_front_half_visual_form(
+    context: RuntimeContext,
+    config: CVFrontHalfConfig,
+) -> None:
+    _run_cv_front_half_visual_form_once(context, config)
 
 
 def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext:
@@ -844,16 +1126,13 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
                 },
             )
 
-        _post_task_expect_window_with_recovery(
+        _run_visual_action_expect_window_with_fallback(
             context,
             "Main_ClickTechnique",
-            TECHNIQUE_WINDOW_KEYWORD,
             "cv_front_half_techniques_window",
-            max_attempts=2,
-            initial_wait_timeout=1.5,
-            retry_wait_timeout=2.0,
+            "Main_ClickTechnique",
         )
-        _post_task(context, "Techniques_SelectCVAndConfirm")
+        _run_techniques_select_cv_and_confirm(context)
 
         main_session = _get_cached_session(context, WINDOW_KEYWORD)
         fast_switched = False
@@ -875,10 +1154,11 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
             _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_rebound")
         else:
             try:
-                _dynamic_click_parameters_and_wait(
+                _run_visual_action_expect_window_with_fallback(
                     context,
-                    CV_PARAM_WINDOW_KEYWORD,
+                    "Main_ClickParameters",
                     "cv_front_half_cv_window_initial",
+                    "Main_ClickParameters",
                 )
             except Exception:
                 context.logger.info("Cached main session post failed, fallback to rebind.")
@@ -892,20 +1172,21 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
                         },
                     )
                 _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_rebound")
-                _dynamic_click_parameters_and_wait(
+                _run_visual_action_expect_window_with_fallback(
                     context,
-                    CV_PARAM_WINDOW_KEYWORD,
+                    "Main_ClickParameters",
                     "cv_front_half_cv_window_initial",
+                    "Main_ClickParameters",
                 )
         if not fast_switched:
-            _dynamic_click_parameters_and_wait(
+            _run_visual_action_expect_window_with_fallback(
                 context,
-                CV_PARAM_WINDOW_KEYWORD,
+                "Main_ClickParameters",
                 "cv_front_half_cv_window_initial",
+                "Main_ClickParameters",
             )
 
-        _post_task(context, "CV_FrontHalf_FillAndConfirm", _build_cv_override(config))
-        _wait_for_window_close(CV_PARAM_WINDOW_KEYWORD)
+        _run_cv_front_half_visual_form(context, config)
         _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_final")
 
         if context.replay_record is not None:
