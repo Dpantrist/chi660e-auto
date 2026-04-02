@@ -18,6 +18,8 @@ class TemplateMatchResult:
     center: tuple[int, int] | None
     success: bool
     image_shape: tuple[int, ...] | None = None
+    actual_roi: tuple[int, int, int, int] | None = None
+    roi_mode: str = "full_window"
 
 
 class VisualActionMode(str, Enum):
@@ -33,6 +35,9 @@ class VisualActionSpec:
     template: str
     threshold: float = 0.8
     mode: VisualActionMode = VisualActionMode.BOX_CENTER_CLICK
+    state_only: bool = False
+    roi: tuple[int, int, int, int] | None = None
+    require_full_window_roi: bool = False
     center_bias: tuple[int, int] = (0, 0)
     relative_roi: tuple[int, int, int, int] | None = None
     column_x1: int | None = None
@@ -60,6 +65,9 @@ class VisualActionResult:
     mode: str
     fallback_used: bool
     template: str
+    image_shape: tuple[int, ...] | None
+    actual_roi: tuple[int, int, int, int] | None
+    roi_mode: str
     error: str | None = None
     attempt: int = 1
     wait_result: Any | None = None
@@ -86,6 +94,29 @@ def load_template_image(template_rel_path: str):
 def compute_box_center(box: tuple[int, int, int, int]) -> tuple[int, int]:
     x, y, width, height = box
     return int(x + width // 2), int(y + height // 2)
+
+
+def compute_full_window_roi(image_shape: tuple[int, ...] | None) -> tuple[int, int, int, int] | None:
+    if image_shape is None or len(image_shape) < 2:
+        return None
+    return (0, 0, int(image_shape[1]), int(image_shape[0]))
+
+
+def _normalize_roi(
+    roi: tuple[int, int, int, int],
+    image_shape: tuple[int, ...] | None,
+) -> tuple[int, int, int, int]:
+    if image_shape is None or len(image_shape) < 2:
+        raise Chi660eAutoError("Image shape is required to normalize ROI.")
+
+    image_height = int(image_shape[0])
+    image_width = int(image_shape[1])
+    x, y, width, height = (int(value) for value in roi)
+    x = max(0, min(x, max(0, image_width - 1)))
+    y = max(0, min(y, max(0, image_height - 1)))
+    width = max(1, min(width, image_width - x))
+    height = max(1, min(height, image_height - y))
+    return (x, y, width, height)
 
 
 def compute_relative_roi_center(
@@ -135,15 +166,35 @@ def match_template_on_current_window(
     controller,
     template_rel_path: str,
     threshold: float = 0.8,
+    roi: tuple[int, int, int, int] | None = None,
 ) -> TemplateMatchResult:
     cv2 = _require_cv2()
     screenshot = capture_once(controller)
     template = load_template_image(template_rel_path)
 
-    result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+    image_shape = tuple(screenshot.shape) if hasattr(screenshot, "shape") else None
+    full_window_roi = compute_full_window_roi(image_shape)
+    roi_mode = "full_window"
+    actual_roi = full_window_roi
+    match_image = screenshot
+
+    if roi is not None:
+        if image_shape is None:
+            raise Chi660eAutoError("Screenshot image shape is unavailable for ROI matching.")
+        actual_roi = _normalize_roi(roi, image_shape)
+        roi_mode = "cropped"
+        roi_x, roi_y, roi_width, roi_height = actual_roi
+        match_image = screenshot[roi_y : roi_y + roi_height, roi_x : roi_x + roi_width]
+
+    result = cv2.matchTemplate(match_image, template, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, max_loc = cv2.minMaxLoc(result)
     width, height = template.shape[1], template.shape[0]
-    box = (int(max_loc[0]), int(max_loc[1]), int(width), int(height))
+    box_x = int(max_loc[0])
+    box_y = int(max_loc[1])
+    if actual_roi is not None:
+        box_x += int(actual_roi[0])
+        box_y += int(actual_roi[1])
+    box = (box_x, box_y, int(width), int(height))
     center = compute_box_center(box)
     return TemplateMatchResult(
         template=template_rel_path,
@@ -151,7 +202,9 @@ def match_template_on_current_window(
         score=float(max_val),
         center=center,
         success=bool(max_val >= threshold),
-        image_shape=tuple(screenshot.shape) if hasattr(screenshot, "shape") else None,
+        image_shape=image_shape,
+        actual_roi=actual_roi,
+        roi_mode=roi_mode,
     )
 
 
@@ -202,6 +255,7 @@ def run_visual_action(
         controller,
         spec.template,
         threshold=spec.threshold,
+        roi=spec.roi,
     )
     result = VisualActionResult(
         success=False,
@@ -216,6 +270,9 @@ def run_visual_action(
         mode=spec.mode.value,
         fallback_used=False,
         template=spec.template,
+        image_shape=match_result.image_shape,
+        actual_roi=match_result.actual_roi,
+        roi_mode=match_result.roi_mode,
     )
 
     if not match_result.success or match_result.box is None:
@@ -334,6 +391,9 @@ def run_visual_action_expect_window(
         mode=spec.mode.value,
         fallback_used=False,
         template=spec.template,
+        image_shape=None,
+        actual_roi=None,
+        roi_mode="full_window",
         error="visual_action_not_run",
     )
 
@@ -354,6 +414,9 @@ def run_visual_action_expect_window(
                 "computed_center": result.computed_center,
                 "relative_roi": result.relative_roi,
                 "computed_rect": result.computed_rect,
+                "image_shape": result.image_shape,
+                "actual_roi": result.actual_roi,
+                "roi_mode": result.roi_mode,
                 "error": result.error,
             }
         )

@@ -26,6 +26,15 @@ from app.window_preset import (
 )
 
 WINDOW_PRESET_VERIFY_RETRIES = 3
+_BOOTSTRAP_MAIN_WINDOW_ERROR_SNIPPETS = (
+    "Failed to connect any matched main window.",
+    "Controller connection failed.",
+    "Controller post_connection() failed.",
+    "Invalid window size",
+    "cannot find any method to screencap",
+    "Initial screencap validation failed.",
+    "Failed to create Win32Controller",
+)
 
 
 def _import_toolkit():
@@ -314,11 +323,40 @@ def bootstrap_app() -> RuntimeContext:
         raise
 
 
+def _iter_exception_chain(exc: BaseException):
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def is_main_window_connection_failure(exc: BaseException) -> bool:
+    for item in _iter_exception_chain(exc):
+        text = str(item)
+        if any(snippet in text for snippet in _BOOTSTRAP_MAIN_WINDOW_ERROR_SNIPPETS):
+            return True
+        if WINDOW_KEYWORD in text and (
+            "verification failed" in text
+            or "Target window not found" in text
+            or "Timed out waiting for window" in text
+        ):
+            return True
+    return False
+
+
+def format_bootstrap_terminal_error(exc: BaseException) -> str:
+    if is_main_window_connection_failure(exc):
+        return "[ERROR] 无法连接 CHI660E 主窗口，请重新打开 CHI660E 后重试。"
+    return "[ERROR] Bootstrap failed. See logs/app.log and debug/maa.log."
+
+
 def main() -> None:
     try:
         bootstrap_app()
-    except Exception:
-        print("[ERROR] Bootstrap failed. See logs/app.log and debug/maa.log.")
+    except Exception as exc:
+        print(format_bootstrap_terminal_error(exc))
         raise SystemExit(1)
 
     print("READY: controller connected, resource loaded, tasker bound.")

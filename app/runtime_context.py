@@ -21,3 +21,4 @@ class RuntimeContext:
     replay_dir: Path | None = None
     status: AppStatus = field(default_factory=AppStatus)
     replay_record: ReplayRecord | None = None
+    last_action_completed_at: float | None = None
