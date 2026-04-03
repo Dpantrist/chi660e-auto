@@ -5,9 +5,10 @@ from dataclasses import dataclass
 
 @dataclass(slots=True)
 class CVFrontHalfConfig:
-    high_potential: str = "0.500"
-    scan_rate: str = "0.100"
-    sweep_segments: str = "2"
+    high_potential: str = "0.8"
+    scan_rate: str = "0.3"
+    sweep_segments: str = "4"
+    sensitivity: str = "1.e-003"
 
 
 def get_default_cv_front_half_config() -> CVFrontHalfConfig:

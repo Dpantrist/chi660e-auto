@@ -50,7 +50,7 @@
   "CV_InputHighPotential_Apply": {
     "recognition": "DirectHit",
     "action": "InputText",
-    "input_text": "0.500",
+    "input_text": "0.8",
     "next": [
       "CV_FocusScanRate"
     ]
@@ -106,7 +106,7 @@
   "CV_InputScanRate_Apply": {
     "recognition": "DirectHit",
     "action": "InputText",
-    "input_text": "0.100",
+    "input_text": "0.3",
     "next": [
       "CV_FocusSweepSegments"
     ]
@@ -162,7 +162,7 @@
   "CV_InputSweepSegments_Apply": {
     "recognition": "DirectHit",
     "action": "InputText",
-    "input_text": "2",
+    "input_text": "4",
     "next": [
       "CV_ClickOK"
     ]

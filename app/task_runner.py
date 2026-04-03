@@ -24,6 +24,7 @@ from app.tasker_manager import bind_tasker, create_tasker
 from app.template_click import (
     VisualActionMode,
     VisualActionResult,
+    click_point,
     compute_full_window_roi,
     run_visual_action,
 )
@@ -43,6 +44,7 @@ WINDOW_PRESET_VERIFY_RETRIES = 3
 MIN_ACTION_GAP_SEC = 1.0
 TECHNIQUE_STATE_SETTLE_SEC = 1.0
 TECHNIQUE_STATE_RECHECK_ATTEMPTS = 3
+CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3 = (0, 108)
 
 
 def _canonical_window_keyword(keyword: str | list[str]) -> str:
@@ -1336,6 +1338,63 @@ def _run_cv_input_field(
     )
 
 
+def _select_cv_sensitivity_dropdown_value(
+    context: RuntimeContext,
+    sensitivity_value: str,
+) -> None:
+    focus_result = _run_visual_action_click(context, "CV_FocusSensitivity")
+    if focus_result.click_point is None:
+        raise Chi660eAutoError("Sensitivity dropdown click point is missing.")
+
+    dropdown_click_point = focus_result.click_point
+    context.logger.info(
+        "CV sensitivity dropdown opened: click_point=%s",
+        dropdown_click_point,
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "cv_sensitivity_dropdown_opened",
+            {
+                "click_point": dropdown_click_point,
+            },
+        )
+
+    if sensitivity_value != "1.e-003":
+        raise NotImplementedError(
+            "Only sensitivity=1.e-003 is supported in current test step."
+        )
+
+    option_click_point = (
+        int(dropdown_click_point[0] + CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3[0]),
+        int(dropdown_click_point[1] + CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3[1]),
+    )
+
+    _enforce_min_action_gap(context, "click:CV_SensitivityOption_1.e-003")
+    click_point(
+        context.controller,
+        option_click_point[0],
+        option_click_point[1],
+        option_click_point,
+    )
+    _mark_action_completed(context)
+    context.logger.info(
+        "CV sensitivity option click: value=%s click_point=%s",
+        sensitivity_value,
+        option_click_point,
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "cv_sensitivity_option_click",
+            {
+                "value": sensitivity_value,
+                "click_point": option_click_point,
+                "offset": CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3,
+            },
+        )
+
+
 def _run_cv_front_half_visual_form_once(
     context: RuntimeContext,
     config: CVFrontHalfConfig,
@@ -1358,6 +1417,7 @@ def _run_cv_front_half_visual_form_once(
         "CV_InputSweepSegments_Apply",
         config.sweep_segments,
     )
+    _select_cv_sensitivity_dropdown_value(context, config.sensitivity)
 
     ok_result = _run_visual_action_click(context, "CV_ClickOK")
     _append_visual_action_event(

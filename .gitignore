@@ -217,6 +217,7 @@ dist/
 # Python cache
 __pycache__/
 *.py[cod]
+app/__pycache__/
 
 # 本项目运行产物（按需）
 logs/
