@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""Business parameter source of truth for the current CV front-half flow.
+
+Pipeline InputText nodes are atomic shells only. Runtime values are injected
+from this config layer and should not be maintained in pipeline JSON.
+"""
+
 from dataclasses import dataclass
 
 

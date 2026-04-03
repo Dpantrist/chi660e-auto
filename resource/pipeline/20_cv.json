@@ -1,13 +1,1 @@
-{
-  "CV_FrontHalf_FillAndConfirm": {
-    "recognition": "DirectHit",
-    "next": [
-      "CV_FocusHighPotential"
-    ]
-  },
-  "CV_ClickOK": {
-    "recognition": "TemplateMatch",
-    "template": "cv/cv_btn_ok_usable.png",
-    "action": "Click"
-  }
-}
+{}

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""Visual action primitives and geometry models.
+
+This module is the source of truth for visual-action geometry types. Flow logic
+belongs in task_runner, while business values belong in config modules.
+"""
+
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -44,6 +50,7 @@ class VisualActionSpec:
     column_x2: int | None = None
     row_top_offset: int | None = None
     row_height: int | None = None
+    dropdown_option_offsets: dict[str, tuple[int, int]] | None = None
     expected_window_keyword: str | list[str] | None = None
     timeout_sec: float = 1.5
     retry_timeout_sec: float = 2.0

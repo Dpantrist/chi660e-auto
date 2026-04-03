@@ -2,8 +2,7 @@
   "Main_ClickTechnique": {
     "recognition": "TemplateMatch",
     "template": "main/main_btn_technique_usable.png",
-    "action": "Click",
-    "target_offset": [-3, -10]
+    "action": "Click"
   },
   "Main_ClickParameters": {
     "recognition": "TemplateMatch",

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Flow orchestration layer.
+
+Business values come from config modules, visual geometry comes from
+visual_action_specs, and pipeline JSON is used only as atomic action or
+fallback shells where explicitly retained.
+"""
+
 import time
 from pathlib import Path
 from typing import Any
@@ -44,7 +51,6 @@ WINDOW_PRESET_VERIFY_RETRIES = 3
 MIN_ACTION_GAP_SEC = 1.0
 TECHNIQUE_STATE_SETTLE_SEC = 1.0
 TECHNIQUE_STATE_RECHECK_ATTEMPTS = 3
-CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3 = (0, 108)
 
 
 def _canonical_window_keyword(keyword: str | list[str]) -> str:
@@ -768,6 +774,8 @@ def _run_visual_action_expect_window_with_fallback(
     replay_name: str,
     pipeline_fallback_entry: str,
 ) -> RuntimeContext:
+    # This helper is only for window-opening actions that still retain an
+    # explicit pipeline fallback shell. Main flow decisions remain in Python.
     spec = get_visual_action_spec(spec_name)
     _enforce_selected_state_spec(spec, intended_click=True)
     last_error: Exception | None = None
@@ -1212,6 +1220,23 @@ def _build_node_override(node_name: str, **fields: Any) -> dict[str, dict[str, A
     }
 
 
+def _build_input_apply_override(apply_entry: str, input_text: str) -> dict[str, dict[str, Any]]:
+    # Pipeline Apply nodes are atomic InputText shells only. Business values are
+    # injected from config here and are not sourced from pipeline JSON.
+    return _build_node_override(apply_entry, input_text=input_text)
+
+
+def _get_dropdown_option_offset(spec_name: str, option_value: str) -> tuple[int, int]:
+    spec = get_visual_action_spec(spec_name)
+    offsets = spec.dropdown_option_offsets or {}
+    try:
+        return offsets[option_value]
+    except KeyError as exc:
+        raise NotImplementedError(
+            f"Dropdown option {option_value!r} is not declared for visual action {spec_name!r}."
+        ) from exc
+
+
 def _double_click_focused_input(
     context: RuntimeContext,
     name: str,
@@ -1334,7 +1359,7 @@ def _run_cv_input_field(
     _post_task(
         context,
         apply_entry,
-        _build_node_override(apply_entry, input_text=input_text, next=[]),
+        _build_input_apply_override(apply_entry, input_text),
     )
 
 
@@ -1342,6 +1367,8 @@ def _select_cv_sensitivity_dropdown_value(
     context: RuntimeContext,
     sensitivity_value: str,
 ) -> None:
+    # Flow decides when to select sensitivity. Geometry and dropdown offsets are
+    # declared in visual_action_specs, and the business value comes from config.
     focus_result = _run_visual_action_click(context, "CV_FocusSensitivity")
     if focus_result.click_point is None:
         raise Chi660eAutoError("Sensitivity dropdown click point is missing.")
@@ -1360,17 +1387,13 @@ def _select_cv_sensitivity_dropdown_value(
             },
         )
 
-    if sensitivity_value != "1.e-003":
-        raise NotImplementedError(
-            "Only sensitivity=1.e-003 is supported in current test step."
-        )
-
+    option_offset = _get_dropdown_option_offset("CV_FocusSensitivity", sensitivity_value)
     option_click_point = (
-        int(dropdown_click_point[0] + CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3[0]),
-        int(dropdown_click_point[1] + CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3[1]),
+        int(dropdown_click_point[0] + option_offset[0]),
+        int(dropdown_click_point[1] + option_offset[1]),
     )
 
-    _enforce_min_action_gap(context, "click:CV_SensitivityOption_1.e-003")
+    _enforce_min_action_gap(context, f"click:CV_SensitivityOption:{sensitivity_value}")
     click_point(
         context.controller,
         option_click_point[0],
@@ -1390,7 +1413,7 @@ def _select_cv_sensitivity_dropdown_value(
             {
                 "value": sensitivity_value,
                 "click_point": option_click_point,
-                "offset": CV_SENSITIVITY_OPTION_OFFSET_1E_MINUS3,
+                "offset": option_offset,
             },
         )
 

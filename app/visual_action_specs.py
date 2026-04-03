@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+"""Visual action declaration layer.
+
+Templates, geometry, state-only rules, and dropdown offsets live here. Flow
+ordering and business parameter values must not be duplicated here.
+"""
+
 from app.template_click import VisualActionMode, VisualActionSpec
 
 
 VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
+    # Main-window button geometry is declared here. 10_common_main.json remains
+    # a fallback click shell only and must not carry primary click offsets.
     "Main_ClickTechnique": VisualActionSpec(
         name="Main_ClickTechnique",
         template="main/main_btn_technique_usable.png",
@@ -24,6 +32,8 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         max_attempts=2,
         allow_pipeline_fallback=True,
     ),
+    # All actions below use Python/spec as the primary path and do not fall back
+    # to legacy pipeline flow definitions.
     "Techniques_SelectCV_Selected_Check": VisualActionSpec(
         name="Techniques_SelectCV_Selected_Check",
         template="techniques/techniques_item_cv_selected.png",
@@ -47,14 +57,14 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         mode=VisualActionMode.BOX_CENTER_CLICK,
         require_full_window_roi=True,
         max_attempts=1,
-        allow_pipeline_fallback=True,
+        allow_pipeline_fallback=False,
     ),
     "Techniques_ClickOK": VisualActionSpec(
         name="Techniques_ClickOK",
         template="techniques/techniques_btn_ok_usable.png",
         mode=VisualActionMode.BOX_CENTER_CLICK,
         max_attempts=1,
-        allow_pipeline_fallback=True,
+        allow_pipeline_fallback=False,
     ),
     "CV_FocusHighPotential": VisualActionSpec(
         name="CV_FocusHighPotential",
@@ -65,7 +75,7 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         row_top_offset=2,
         row_height=37,
         max_attempts=1,
-        allow_pipeline_fallback=True,
+        allow_pipeline_fallback=False,
     ),
     "CV_FocusScanRate": VisualActionSpec(
         name="CV_FocusScanRate",
@@ -76,7 +86,7 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         row_top_offset=2,
         row_height=37,
         max_attempts=1,
-        allow_pipeline_fallback=True,
+        allow_pipeline_fallback=False,
     ),
     "CV_FocusSweepSegments": VisualActionSpec(
         name="CV_FocusSweepSegments",
@@ -87,7 +97,7 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         row_top_offset=2,
         row_height=37,
         max_attempts=1,
-        allow_pipeline_fallback=True,
+        allow_pipeline_fallback=False,
     ),
     "CV_FocusSensitivity": VisualActionSpec(
         name="CV_FocusSensitivity",
@@ -97,15 +107,18 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         column_x2=444,
         row_top_offset=2,
         row_height=37,
+        dropdown_option_offsets={
+            "1.e-003": (0, 108),
+        },
         max_attempts=1,
-        allow_pipeline_fallback=True,
+        allow_pipeline_fallback=False,
     ),
     "CV_ClickOK": VisualActionSpec(
         name="CV_ClickOK",
         template="cv/cv_btn_ok_usable.png",
         mode=VisualActionMode.BOX_CENTER_CLICK,
         max_attempts=1,
-        allow_pipeline_fallback=True,
+        allow_pipeline_fallback=False,
     ),
 }
 
