@@ -401,27 +401,61 @@ def _find_nearest_control_to_label(
     )
 
 
-def _find_filename_edit_fallback(dialog: SaveDialogWindow) -> ResolvedDialogControl | None:
-    edits = [
-        child
-        for child in _enum_child_windows(dialog.hwnd, visible_only=False)
-        if child.class_name == "Edit" and child.rect[2] >= 80
-    ]
-    focused_hwnd = _get_focused_child_hwnd(dialog.hwnd)
-    edits.sort(key=lambda item: (item.rect[1], item.rect[2], item.rect[0]), reverse=True)
-    if focused_hwnd:
-        edits.sort(key=lambda item: item.hwnd == focused_hwnd, reverse=True)
-    if not edits:
+def _find_filename_edit_fallback(
+    dialog: SaveDialogWindow,
+    *,
+    exclude_hwnds: set[int] | None = None,
+    logger=None,
+) -> ResolvedDialogControl | None:
+    exclude_hwnds = set(exclude_hwnds or set())
+    dialog_top = _window_rect(dialog.hwnd)[1]
+    dialog_height = _window_rect(dialog.hwnd)[3]
+    bottom_band_top = dialog_top + int(dialog_height * 0.60)
+
+    candidates: list[tuple[int, ResolvedDialogControl]] = []
+    for child in _enum_child_windows(dialog.hwnd, visible_only=False):
+        if child.class_name not in {"Edit", "ComboBox", "ComboBoxEx32"}:
+            continue
+        if child.rect[2] < 80:
+            continue
+        if child.rect[1] < bottom_band_top:
+            continue
+        if child.hwnd in exclude_hwnds:
+            if logger is not None:
+                logger.info("Save As filename fallback skipped excluded control: hwnd=%s", child.hwnd)
+            continue
+
+        resolved = _resolve_edit_from_control(
+            ResolvedDialogControl(
+                hwnd=child.hwnd,
+                class_name=child.class_name,
+                method="fallback_bottom_band",
+                text=child.text,
+                rect=child.rect,
+            )
+        )
+        if resolved.class_name != "Edit":
+            continue
+        if resolved.hwnd in exclude_hwnds:
+            if logger is not None:
+                logger.info("Save As filename fallback skipped excluded control: hwnd=%s", resolved.hwnd)
+            continue
+
+        class_priority = 0 if child.class_name in {"ComboBox", "ComboBoxEx32"} else 1
+        candidates.append((class_priority, resolved))
+
+    if not candidates:
         return None
 
-    selected = edits[0]
-    return ResolvedDialogControl(
-        hwnd=selected.hwnd,
-        class_name=selected.class_name,
-        method="fallback_edit_guess",
-        text=selected.text,
-        rect=selected.rect,
+    candidates.sort(
+        key=lambda item: (
+            item[0],
+            -item[1].rect[1],
+            -item[1].rect[2],
+            item[1].rect[0],
+        )
     )
+    return candidates[0][1]
 
 
 def _resolve_edit_from_control(control: ResolvedDialogControl) -> ResolvedDialogControl:
@@ -447,20 +481,28 @@ def _resolve_edit_from_control(control: ResolvedDialogControl) -> ResolvedDialog
     )
 
 
-def _resolve_filename_control(dialog: SaveDialogWindow, logger=None) -> ResolvedDialogControl:
+def _resolve_filename_control(
+    dialog: SaveDialogWindow,
+    logger=None,
+    exclude_hwnds: set[int] | None = None,
+) -> ResolvedDialogControl:
+    exclude_hwnds = set(exclude_hwnds or set())
     control = _find_nearest_control_to_label(dialog, FILE_NAME_LABEL_KEYWORDS, ("Edit", "ComboBoxEx32", "ComboBox"))
     if control is not None:
         control = _resolve_edit_from_control(control)
+        if control.hwnd not in exclude_hwnds:
+            if logger is not None:
+                logger.info(
+                    "Save As filename control resolved: hwnd=%s class=%s method=%s",
+                    control.hwnd,
+                    control.class_name,
+                    control.method,
+                )
+            return control
         if logger is not None:
-            logger.info(
-                "Save As filename control resolved: hwnd=%s class=%s method=%s",
-                control.hwnd,
-                control.class_name,
-                control.method,
-            )
-        return control
+            logger.info("Save As filename label association skipped excluded control: hwnd=%s", control.hwnd)
 
-    fallback = _find_filename_edit_fallback(dialog)
+    fallback = _find_filename_edit_fallback(dialog, exclude_hwnds=exclude_hwnds, logger=logger)
     if fallback is not None:
         if logger is not None:
             logger.info(
@@ -507,17 +549,6 @@ def _find_directory_edit_guess(dialog: SaveDialogWindow) -> ResolvedDialogContro
 
 
 def _resolve_directory_control(dialog: SaveDialogWindow, logger=None) -> ResolvedDialogControl:
-    direct = _find_directory_edit_guess(dialog)
-    if direct is not None:
-        if logger is not None:
-            logger.info(
-                "Save As directory control resolved: hwnd=%s class=%s method=%s",
-                direct.hwnd,
-                direct.class_name,
-                direct.method,
-            )
-        return direct
-
     _set_foreground_window(dialog.hwnd)
     for shortcut_name, modifier, key in (
         ("alt_d_focus", VK_MENU, VK_D),
@@ -542,6 +573,17 @@ def _resolve_directory_control(dialog: SaveDialogWindow, logger=None) -> Resolve
                     control.method,
                 )
             return control
+
+    direct = _find_directory_edit_guess(dialog)
+    if direct is not None:
+        if logger is not None:
+            logger.info(
+                "Save As directory control resolved: hwnd=%s class=%s method=%s",
+                direct.hwnd,
+                direct.class_name,
+                direct.method,
+            )
+        return direct
 
     raise Chi660eAutoError("Failed to resolve Save As directory control.")
 
@@ -788,6 +830,28 @@ def _normalize_path_text(text: str) -> str:
     return normalized.rstrip("\\/").lower()
 
 
+def _choose_nonconflicting_filename(save_dir: Path, requested_filename: str) -> str:
+    normalized_filename = Path(str(requested_filename)).name
+    if not normalized_filename:
+        raise Chi660eAutoError("Save As requested filename must not be empty.")
+
+    candidate_path = save_dir / normalized_filename
+    if not candidate_path.exists():
+        return normalized_filename
+
+    requested_path = Path(normalized_filename)
+    stem = requested_path.stem
+    suffix = requested_path.suffix
+
+    index = 1
+    while True:
+        candidate_name = f"{stem} ({index}){suffix}"
+        candidate_path = save_dir / candidate_name
+        if not candidate_path.exists():
+            return candidate_name
+        index += 1
+
+
 def _find_save_button(dialog: SaveDialogWindow, logger=None) -> DialogChildWindow | None:
     buttons = [
         child
@@ -960,6 +1024,8 @@ def set_save_directory(dialog: SaveDialogWindow, directory: str | Path, logger=N
             method,
         )
     if not matched:
+        if logger is not None:
+            logger.error("Save As stopped before filename/type steps because directory verification failed")
         raise Chi660eAutoError(
             f"Save As directory verification failed: expected={directory_path!r} actual={actual_after!r}"
         )
@@ -971,21 +1037,29 @@ def set_save_directory(dialog: SaveDialogWindow, directory: str | Path, logger=N
         "directory": directory_path,
         "actual": actual_after,
         "matched": True,
+        "control_hwnd": control.hwnd,
     }
     if logger is not None:
         logger.info("Save As directory set: directory=%s method=%s", directory_path, result["method"])
     return result
 
 
-def set_filename(dialog: SaveDialogWindow, filename: str, logger=None) -> dict[str, object]:
+def set_filename(
+    dialog: SaveDialogWindow,
+    filename: str,
+    logger=None,
+    exclude_hwnds: set[int] | None = None,
+) -> dict[str, object]:
     requested_filename = Path(str(filename)).name
+    exclude_hwnds = set(exclude_hwnds or set())
     if logger is not None:
         logger.info("entered set_filename")
         logger.info("Save As filename set requested: %s", requested_filename)
+        logger.info("Save As filename exclude_hwnds: %s", sorted(exclude_hwnds))
     _dialog_step_gap("set_filename", logger=logger)
     _set_foreground_window(dialog.hwnd)
 
-    control = _resolve_filename_control(dialog, logger=logger)
+    control = _resolve_filename_control(dialog, logger=logger, exclude_hwnds=exclude_hwnds)
     actual = _write_and_verify_edit_text(control.hwnd, requested_filename)
     method = f"{control.method}+wm_settext"
     if actual != requested_filename:
@@ -1271,14 +1345,27 @@ def save_as_txt(
     save_dir_path.mkdir(parents=True, exist_ok=True)
 
     normalized_filename = Path(str(filename)).name
-    target_file = save_dir_path / normalized_filename
+    if logger is not None:
+        logger.info("Save As filename requested: %s", normalized_filename)
+    resolved_filename = _choose_nonconflicting_filename(save_dir_path, normalized_filename)
+    if logger is not None:
+        logger.info("Save As filename resolved: %s", resolved_filename)
+        if resolved_filename != normalized_filename:
+            logger.info(
+                "Save As filename collision resolved: requested=%s resolved=%s",
+                normalized_filename,
+                resolved_filename,
+            )
+
+    target_file = save_dir_path / resolved_filename
     target_existed_before = target_file.exists()
     previous_mtime_ns = target_file.stat().st_mtime_ns if target_existed_before else None
     previous_size = target_file.stat().st_size if target_existed_before else None
 
     dialog = wait_for_save_as_dialog(timeout_sec=dialog_timeout_sec, logger=logger)
     directory_result = set_save_directory(dialog, save_dir_path, logger=logger)
-    filename_result = set_filename(dialog, normalized_filename, logger=logger)
+    filename_exclude_hwnds = {directory_result["control_hwnd"]} if directory_result.get("control_hwnd") else set()
+    filename_result = set_filename(dialog, resolved_filename, logger=logger, exclude_hwnds=filename_exclude_hwnds)
     type_result = set_save_type_to_txt(dialog, logger=logger)
     confirm_result = confirm_save(dialog, logger=logger)
     completion_result = _wait_for_save_completion(
