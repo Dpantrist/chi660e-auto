@@ -1459,49 +1459,88 @@ def _run_cv_front_half_visual_form(
     _run_cv_front_half_visual_form_once(context, config)
 
 
+def bind_runtime_context_to_window(
+    context: RuntimeContext,
+    keyword: str | list[str],
+    capture_name: str,
+    timeout_sec: float | None = None,
+    interval_sec: float | None = None,
+) -> RuntimeContext:
+    return _bind_context_to_window(
+        context,
+        keyword,
+        capture_name,
+        timeout_sec=timeout_sec,
+        interval_sec=interval_sec,
+    )
+
+
+def run_visual_action_once_in_context(context: RuntimeContext, spec_name: str) -> VisualActionResult:
+    return _run_visual_action_once(context, spec_name)
+
+
+def run_visual_action_click_in_context(context: RuntimeContext, spec_name: str) -> VisualActionResult:
+    return _run_visual_action_click(context, spec_name)
+
+
+def wait_for_window_close_by_keyword(keyword: str, timeout_sec: float = WINDOW_WAIT_TIMEOUT_SEC) -> None:
+    _wait_for_window_close(keyword, timeout_sec=timeout_sec)
+
+
+def run_cv_front_half_on_context(
+    context: RuntimeContext,
+    config: CVFrontHalfConfig,
+) -> RuntimeContext:
+    # 前半圈主路径仍由流程层负责：窗口切换、步骤顺序、fallback 决策都只在这里。
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "cv_front_half_start",
+            {
+                "high_potential": config.high_potential,
+                "scan_rate": config.scan_rate,
+                "sweep_segments": config.sweep_segments,
+                "sensitivity": config.sensitivity,
+            },
+        )
+
+    _run_visual_action_expect_window_with_fallback(
+        context,
+        "Main_ClickTechnique",
+        "cv_front_half_techniques_window",
+        "Main_ClickTechnique",
+    )
+    _run_techniques_select_cv_and_confirm(context)
+    _bind_next_window_or_open_from_main(
+        context,
+        next_window_keyword=CV_PARAM_WINDOW_KEYWORD,
+        direct_replay_name="cv_front_half_cv_window_direct",
+        main_rebind_replay_name="cv_front_half_main_rebound",
+        main_click_spec_name="Main_ClickParameters",
+        main_click_replay_name="cv_front_half_cv_window_initial",
+        direct_wait_timeout=2.0,
+        direct_wait_interval=0.2,
+    )
+
+    _run_cv_front_half_visual_form(context, config)
+    _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_final")
+
+    if context.replay_record is not None:
+        append_event(context.replay_record, "cv_front_half_ready", {"window": MAIN_WINDOW_TITLE_CANDIDATES})
+
+    context.logger.info("CV front-half flow completed.")
+    return context
+
+
 def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext:
     context = bootstrap_app()
     config = config or get_default_cv_front_half_config()
 
     try:
+        result = run_cv_front_half_on_context(context, config)
         if context.replay_record is not None:
-            append_event(
-                context.replay_record,
-                "cv_front_half_start",
-                {
-                    "high_potential": config.high_potential,
-                    "scan_rate": config.scan_rate,
-                    "sweep_segments": config.sweep_segments,
-                },
-            )
-
-        _run_visual_action_expect_window_with_fallback(
-            context,
-            "Main_ClickTechnique",
-            "cv_front_half_techniques_window",
-            "Main_ClickTechnique",
-        )
-        _run_techniques_select_cv_and_confirm(context)
-        _bind_next_window_or_open_from_main(
-            context,
-            next_window_keyword=CV_PARAM_WINDOW_KEYWORD,
-            direct_replay_name="cv_front_half_cv_window_direct",
-            main_rebind_replay_name="cv_front_half_main_rebound",
-            main_click_spec_name="Main_ClickParameters",
-            main_click_replay_name="cv_front_half_cv_window_initial",
-            direct_wait_timeout=2.0,
-            direct_wait_interval=0.2,
-        )
-
-        _run_cv_front_half_visual_form(context, config)
-        _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_final")
-
-        if context.replay_record is not None:
-            append_event(context.replay_record, "cv_front_half_ready", {"window": MAIN_WINDOW_TITLE_CANDIDATES})
             finalize_session(context.replay_record, status="completed")
-
-        context.logger.info("CV front-half flow completed.")
-        return context
+        return result
     except Exception as exc:
         context.logger.exception("CV front-half flow failed.")
         if context.replay_record is not None:

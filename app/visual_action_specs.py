@@ -12,6 +12,20 @@ from app.template_click import VisualActionMode, VisualActionSpec
 VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
     # Main-window button geometry is declared here. 10_common_main.json remains
     # a fallback click shell only and must not carry primary click offsets.
+    "Main_CheckPauseDisabled": VisualActionSpec(
+        name="Main_CheckPauseDisabled",
+        template="main/main_btn_pause_disabled.png",
+        threshold=0.9,
+        mode=VisualActionMode.DETECT_ONLY,
+        allow_pipeline_fallback=False,
+    ),
+    "Main_CheckPauseUsable": VisualActionSpec(
+        name="Main_CheckPauseUsable",
+        template="main/main_btn_pause_usable.png",
+        threshold=0.9,
+        mode=VisualActionMode.DETECT_ONLY,
+        allow_pipeline_fallback=False,
+    ),
     "Main_ClickTechnique": VisualActionSpec(
         name="Main_ClickTechnique",
         template="main/main_btn_technique_usable.png",
@@ -31,6 +45,20 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         retry_timeout_sec=2.5,
         max_attempts=2,
         allow_pipeline_fallback=True,
+    ),
+    "Main_ClickRun": VisualActionSpec(
+        name="Main_ClickRun",
+        template="main/main_btn_run_usable.png",
+        mode=VisualActionMode.BOX_CENTER_CLICK,
+        max_attempts=1,
+        allow_pipeline_fallback=False,
+    ),
+    "Main_ClickSaveAs": VisualActionSpec(
+        name="Main_ClickSaveAs",
+        template="main/main_btn_save_as_usable.png",
+        mode=VisualActionMode.BOX_CENTER_CLICK,
+        max_attempts=1,
+        allow_pipeline_fallback=False,
     ),
     # All actions below use Python/spec as the primary path and do not fall back
     # to legacy pipeline flow definitions.
