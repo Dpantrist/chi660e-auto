@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 
 from app.bootstrap import (
     format_bootstrap_terminal_error,
@@ -9,28 +10,50 @@ from app.bootstrap import (
 )
 from app.gui_app import launch_workflow_gui
 from app.paths import BASE_DIR
-from app.task_runner import run_cv_front_half
-from app.workflow_runner import run_default_workflow
+from app.task_runner import run_cv_front_half, run_eis_front_half
+from app.workflow_runner import run_default_workflow, run_workflow_segments
+from app.workflow_segments import build_eis_after_activation_segment
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
+DEFAULT_SAVE_DIRECTORY = BASE_DIR / "tests" / "test_data"
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="CHI660E 自动化入口。按用途区分前半圈调试、workflow 执行与 GUI 规划入口。",
+    )
+
+    debug_group = parser.add_argument_group("前半圈调试入口")
+    debug_group.add_argument(
         "--run-cv-front-half",
         action="store_true",
-        help="Run the minimal CV front-half loop after bootstrap.",
+        help="只跑 CV 前半圈调试：Technique -> CV Parameters -> 填参 -> OK。",
     )
-    parser.add_argument(
+    debug_group.add_argument(
+        "--run-eis-front-half",
+        action="store_true",
+        help="只跑 EIS 前半圈调试：Technique -> A.C. Impedance Parameters -> 填参 -> OK。",
+    )
+
+    workflow_group = parser.add_argument_group("Workflow 入口")
+    workflow_group.add_argument(
         "--run-default-workflow",
         action="store_true",
-        help="Run the default runnable workflow plan (currently activation CV only).",
+        help="运行当前默认 workflow（当前默认计划：activation CV 完整闭环）。",
     )
-    parser.add_argument(
+    workflow_group.add_argument(
+        "--run-eis-workflow",
+        action="store_true",
+        help="运行最小 EIS workflow（当前为单段 eis_after_activation 完整闭环）。",
+    )
+
+    gui_group = parser.add_argument_group("GUI 入口")
+    gui_group.add_argument(
         "--gui",
         action="store_true",
-        help="Launch the minimal workflow planner GUI.",
+        help="启动 workflow 规划 GUI。",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _print_runtime_error(exc: Exception) -> None:
@@ -40,21 +63,42 @@ def _print_runtime_error(exc: Exception) -> None:
     print(f"[ERROR] {exc}")
 
 
-if __name__ == "__main__":
-    args = parse_args()
+def _run_with_handled_errors(action: Callable[[], object]) -> int:
+    try:
+        action()
+    except Exception as exc:
+        _print_runtime_error(exc)
+        return 1
+    return 0
+
+
+def _run_eis_workflow_entry() -> None:
+    segments = [build_eis_after_activation_segment(order=1)]
+    run_workflow_segments(segments, save_directory=DEFAULT_SAVE_DIRECTORY)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+
     if args.gui:
         launch_workflow_gui()
-    elif args.run_default_workflow:
-        try:
-            run_default_workflow(BASE_DIR / "tests" / "test_data")
-        except Exception as exc:
-            _print_runtime_error(exc)
-            raise SystemExit(1)
-    elif args.run_cv_front_half:
-        try:
-            run_cv_front_half()
-        except Exception as exc:
-            _print_runtime_error(exc)
-            raise SystemExit(1)
-    else:
-        bootstrap_main()
+        return 0
+
+    if args.run_default_workflow:
+        return _run_with_handled_errors(lambda: run_default_workflow(DEFAULT_SAVE_DIRECTORY))
+
+    if args.run_eis_workflow:
+        return _run_with_handled_errors(_run_eis_workflow_entry)
+
+    if args.run_eis_front_half:
+        return _run_with_handled_errors(run_eis_front_half)
+
+    if args.run_cv_front_half:
+        return _run_with_handled_errors(run_cv_front_half)
+
+    bootstrap_main()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

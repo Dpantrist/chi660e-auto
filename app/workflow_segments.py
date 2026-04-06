@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any
 
 from app.cv_config import CVFrontHalfConfig
+from app.eis_config import EISFrontHalfConfig, get_default_eis_front_half_config
 from app.naming_rules import (
     build_activation_cv_filename,
     build_cv_filename,
@@ -69,13 +70,13 @@ def calculate_gcd_current_a(current_density_ma_cm2: float | str, electrode_area_
 def segment_block_reason(segment: WorkflowSegment) -> str | None:
     if segment.segment_type in {
         WorkflowSegmentType.ACTIVATION_CV,
+        WorkflowSegmentType.EIS_AFTER_ACTIVATION,
         WorkflowSegmentType.CV_SERIES_ITEM,
         WorkflowSegmentType.REST,
     }:
         return None
 
     if segment.segment_type in {
-        WorkflowSegmentType.EIS_AFTER_ACTIVATION,
         WorkflowSegmentType.EIS_AFTER_CV,
         WorkflowSegmentType.EIS_AFTER_GCD,
     }:
@@ -113,13 +114,21 @@ def build_activation_cv_segment(
     )
 
 
-def build_eis_after_activation_segment(order: int) -> WorkflowSegment:
+def build_eis_after_activation_segment(
+    order: int,
+    config: EISFrontHalfConfig | None = None,
+) -> WorkflowSegment:
+    config = config or get_default_eis_front_half_config()
     return WorkflowSegment(
         segment_id="eis_after_activation",
         segment_type=WorkflowSegmentType.EIS_AFTER_ACTIVATION,
         enabled=True,
         order=order,
         display_name="EIS-after activation",
+        params={
+            "high_frequency_hz": str(config.high_frequency_hz),
+            "low_frequency_hz": str(config.low_frequency_hz),
+        },
     )
 
 
@@ -233,6 +242,18 @@ def build_cv_front_half_config_for_segment(segment: WorkflowSegment) -> CVFrontH
 
     raise NotImplementedError(
         f"Front-half parameter build is not implemented for segment type {segment.segment_type.value!r}."
+    )
+
+
+def build_eis_front_half_config_for_segment(segment: WorkflowSegment) -> EISFrontHalfConfig:
+    if segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION:
+        return EISFrontHalfConfig(
+            high_frequency_hz=str(segment.params["high_frequency_hz"]),
+            low_frequency_hz=str(segment.params["low_frequency_hz"]),
+        )
+
+    raise NotImplementedError(
+        f"EIS front-half parameter build is not implemented for segment type {segment.segment_type.value!r}."
     )
 
 

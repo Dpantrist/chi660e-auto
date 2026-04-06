@@ -23,6 +23,7 @@ from app.controller_manager import (
 from app.cursor_guard import move_cursor_to_window_safe_corner
 from app.cv_config import CVFrontHalfConfig, get_default_cv_front_half_config
 from app.dto import WindowSession
+from app.eis_config import EISFrontHalfConfig, get_default_eis_front_half_config
 from app.errors import Chi660eAutoError, WindowNotFoundError
 from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
@@ -44,6 +45,7 @@ from app.window_preset import (
 
 TECHNIQUE_WINDOW_KEYWORD = "Electrochemical Techniques"
 CV_PARAM_WINDOW_KEYWORD = "Cyclic Voltammetry Parameters"
+EIS_PARAM_WINDOW_KEYWORD = "A.C. Impedance Parameters"
 
 WINDOW_WAIT_TIMEOUT_SEC = 6.0
 WINDOW_WAIT_INTERVAL_SEC = 0.15
@@ -1055,6 +1057,98 @@ def _run_techniques_select_cv_and_confirm(context: RuntimeContext) -> None:
     raise Chi660eAutoError("Technique OK click failed.")
 
 
+def _confirm_technique_eis_selected_after_click(context: RuntimeContext) -> bool:
+    context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
+    time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+
+    for attempt in range(1, TECHNIQUE_STATE_RECHECK_ATTEMPTS + 1):
+        selected_result = _run_visual_action_once(context, "Techniques_SelectEIS_Selected_Check")
+        context.logger.info(
+            "Technique EIS selected recheck: attempt=%s matched=%s score=%.6f",
+            attempt,
+            selected_result.matched,
+            selected_result.score,
+        )
+        if selected_result.matched:
+            context.logger.info("Technique selection confirmed by selected-check")
+            return True
+
+        unselected_result = _run_visual_action_once(context, "Techniques_SelectEIS_Unselected_Check")
+        context.logger.info(
+            "Technique EIS unselected recheck: attempt=%s matched=%s score=%.6f",
+            attempt,
+            unselected_result.matched,
+            unselected_result.score,
+        )
+        if not unselected_result.matched:
+            context.logger.info("Technique selection confirmed by unselected disappearance")
+            return True
+
+        if attempt < TECHNIQUE_STATE_RECHECK_ATTEMPTS:
+            context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
+            time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+
+    return False
+
+
+def _run_techniques_select_eis_and_confirm(context: RuntimeContext) -> None:
+    selected_result = _run_visual_action_once(context, "Techniques_SelectEIS_Selected_Check")
+    context.logger.info(
+        "Technique initial EIS selected check: matched=%s score=%.6f",
+        selected_result.matched,
+        selected_result.score,
+    )
+    if selected_result.matched:
+        context.logger.info("EIS item already selected: no click needed")
+        context.logger.info(
+            "Visual action skipped click: name=%s reason=already_selected",
+            "Techniques_SelectEIS_Unselected_Click",
+        )
+        _append_visual_action_event(
+            context,
+            "visual_action_skip_click",
+            get_visual_action_spec("Techniques_SelectEIS_Unselected_Click"),
+            selected_result,
+            {"reason": "already_selected"},
+        )
+    else:
+        unselected_result = _run_visual_action_once(context, "Techniques_SelectEIS_Unselected_Check")
+        context.logger.info(
+            "Technique initial EIS unselected check: matched=%s score=%.6f",
+            unselected_result.matched,
+            unselected_result.score,
+        )
+        if not unselected_result.matched:
+            raise Chi660eAutoError(
+                "Technique EIS state is ambiguous: neither selected nor unselected matched."
+            )
+
+        click_result = _run_visual_action_once(context, "Techniques_SelectEIS_Unselected_Click")
+        if not click_result.success:
+            raise Chi660eAutoError("Technique item click failed for unselected EIS item.")
+        context.logger.info("EIS item selected via unselected click")
+
+        if not _confirm_technique_eis_selected_after_click(context):
+            context.logger.error("Technique selection failed after state recheck attempts")
+            raise Chi660eAutoError("Technique selection failed after state recheck attempts.")
+
+    for attempt in range(1, 3):
+        ok_result = _run_visual_action_once(context, "Techniques_ClickOK")
+        if ok_result.success:
+            context.logger.info("Visual action succeeded: name=%s", "Techniques_ClickOK")
+            _append_visual_action_event(
+                context,
+                "visual_action_succeeded",
+                get_visual_action_spec("Techniques_ClickOK"),
+                ok_result,
+            )
+            return
+        if attempt < 2:
+            context.logger.warning("Technique OK click retry: attempt=%s", attempt + 1)
+
+    raise Chi660eAutoError("Technique OK click failed.")
+
+
 def _bind_next_window_or_open_from_main(
     context: RuntimeContext,
     next_window_keyword: str | list[str],
@@ -1062,6 +1156,7 @@ def _bind_next_window_or_open_from_main(
     main_rebind_replay_name: str,
     main_click_spec_name: str,
     main_click_replay_name: str,
+    pipeline_fallback_entry: str | None = None,
     direct_wait_timeout: float = 2.0,
     direct_wait_interval: float = 0.2,
 ) -> RuntimeContext:
@@ -1166,6 +1261,8 @@ def _bind_next_window_or_open_from_main(
             level="INFO",
         )
 
+    fallback_entry = pipeline_fallback_entry or main_click_spec_name
+
     main_session = _get_cached_session(context, WINDOW_KEYWORD)
     fast_switched = False
     if main_session is not None and _session_still_usable(context, main_session):
@@ -1191,7 +1288,7 @@ def _bind_next_window_or_open_from_main(
                 context,
                 main_click_spec_name,
                 main_click_replay_name,
-                main_click_spec_name,
+                fallback_entry,
             )
         except Exception:
             context.logger.info("Cached main session post failed, fallback to rebind.")
@@ -1210,7 +1307,7 @@ def _bind_next_window_or_open_from_main(
         context,
         main_click_spec_name,
         main_click_replay_name,
-        main_click_spec_name,
+        fallback_entry,
     )
 
 
@@ -1343,24 +1440,36 @@ def _delete_immediately_after_double_click(context: RuntimeContext, name: str) -
     return result
 
 
-def _run_cv_input_field(
+def _run_text_input_field(
     context: RuntimeContext,
     focus_name: str,
     apply_entry: str,
     input_text: str,
+    cleanup_passes: int = 1,
 ) -> None:
     focus_result = _locate_visual_action_point(context, focus_name)
     if focus_result.click_point is None:
         raise Chi660eAutoError(f"Visual focus click point is missing for {focus_name}.")
 
     context.logger.info("Input focus located: name=%s click_point=%s", focus_name, focus_result.click_point)
-    _double_click_focused_input(context, focus_name, focus_result.click_point)
-    _delete_immediately_after_double_click(context, focus_name)
+    # 仅在指定字段上增加额外清理轮次，默认仍保持现有一轮行为。
+    for _ in range(max(1, cleanup_passes)):
+        _double_click_focused_input(context, focus_name, focus_result.click_point)
+        _delete_immediately_after_double_click(context, focus_name)
     _post_task(
         context,
         apply_entry,
         _build_input_apply_override(apply_entry, input_text),
     )
+
+
+def _run_cv_input_field(
+    context: RuntimeContext,
+    focus_name: str,
+    apply_entry: str,
+    input_text: str,
+) -> None:
+    _run_text_input_field(context, focus_name, apply_entry, input_text)
 
 
 def _select_cv_sensitivity_dropdown_value(
@@ -1459,6 +1568,43 @@ def _run_cv_front_half_visual_form(
     _run_cv_front_half_visual_form_once(context, config)
 
 
+def _run_eis_front_half_visual_form_once(
+    context: RuntimeContext,
+    config: EISFrontHalfConfig,
+) -> None:
+    context.logger.info("EIS high frequency input start/value=%s", config.high_frequency_hz)
+    _run_text_input_field(
+        context,
+        "EIS_FocusHighFrequency",
+        "EIS_InputHighFrequency_Apply",
+        config.high_frequency_hz,
+        cleanup_passes=2,
+    )
+    context.logger.info("EIS low frequency input start/value=%s", config.low_frequency_hz)
+    _run_text_input_field(
+        context,
+        "EIS_FocusLowFrequency",
+        "EIS_InputLowFrequency_Apply",
+        config.low_frequency_hz,
+    )
+
+    ok_result = _run_visual_action_click(context, "EIS_ClickOK")
+    _append_visual_action_event(
+        context,
+        "visual_action_succeeded",
+        get_visual_action_spec("EIS_ClickOK"),
+        ok_result,
+    )
+    _wait_for_window_close(EIS_PARAM_WINDOW_KEYWORD)
+
+
+def _run_eis_front_half_visual_form(
+    context: RuntimeContext,
+    config: EISFrontHalfConfig,
+) -> None:
+    _run_eis_front_half_visual_form_once(context, config)
+
+
 def bind_runtime_context_to_window(
     context: RuntimeContext,
     keyword: str | list[str],
@@ -1532,6 +1678,49 @@ def run_cv_front_half_on_context(
     return context
 
 
+def run_eis_front_half_on_context(
+    context: RuntimeContext,
+    config: EISFrontHalfConfig,
+) -> RuntimeContext:
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "eis_front_half_start",
+            {
+                "high_frequency_hz": config.high_frequency_hz,
+                "low_frequency_hz": config.low_frequency_hz,
+            },
+        )
+
+    _run_visual_action_expect_window_with_fallback(
+        context,
+        "Main_ClickTechnique",
+        "eis_front_half_techniques_window",
+        "Main_ClickTechnique",
+    )
+    _run_techniques_select_eis_and_confirm(context)
+    _bind_next_window_or_open_from_main(
+        context,
+        next_window_keyword=EIS_PARAM_WINDOW_KEYWORD,
+        direct_replay_name="eis_front_half_param_window_direct",
+        main_rebind_replay_name="eis_front_half_main_rebound",
+        main_click_spec_name="Main_ClickParametersEIS",
+        main_click_replay_name="eis_front_half_param_window_initial",
+        pipeline_fallback_entry="Main_ClickParameters",
+        direct_wait_timeout=2.0,
+        direct_wait_interval=0.2,
+    )
+
+    _run_eis_front_half_visual_form(context, config)
+    _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "eis_front_half_main_final")
+
+    if context.replay_record is not None:
+        append_event(context.replay_record, "eis_front_half_ready", {"window": MAIN_WINDOW_TITLE_CANDIDATES})
+
+    context.logger.info("EIS front-half flow completed.")
+    return context
+
+
 def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext:
     context = bootstrap_app()
     config = config or get_default_cv_front_half_config()
@@ -1553,6 +1742,32 @@ def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext
             finalize_session(context.replay_record, status="error", error=str(exc))
         try:
             _save_step_capture(context, "cv_front_half_error")
+        except Exception:
+            context.logger.exception("Failed to save runner error capture.")
+        raise
+
+
+def run_eis_front_half(config: EISFrontHalfConfig | None = None) -> RuntimeContext:
+    context = bootstrap_app()
+    config = config or get_default_eis_front_half_config()
+
+    try:
+        result = run_eis_front_half_on_context(context, config)
+        if context.replay_record is not None:
+            finalize_session(context.replay_record, status="completed")
+        return result
+    except Exception as exc:
+        context.logger.exception("EIS front-half flow failed.")
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "error",
+                {"message": str(exc), "stage": "eis_front_half"},
+                level="ERROR",
+            )
+            finalize_session(context.replay_record, status="error", error=str(exc))
+        try:
+            _save_step_capture(context, "eis_front_half_error")
         except Exception:
             context.logger.exception("Failed to save runner error capture.")
         raise

@@ -15,11 +15,12 @@ from app.errors import Chi660eAutoError
 from app.post_run_flow import run_post_run_public_flow
 from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
-from app.task_runner import run_cv_front_half_on_context
+from app.task_runner import run_cv_front_half_on_context, run_eis_front_half_on_context
 from app.workflow_segments import (
     WorkflowSegment,
     WorkflowSegmentType,
     build_cv_front_half_config_for_segment,
+    build_eis_front_half_config_for_segment,
     build_default_runnable_segment_plan,
     build_output_filename_for_segment,
     segment_block_reason,
@@ -109,6 +110,30 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
             raise RuntimeError(f"Missing output filename for segment {segment.segment_id!r}.")
 
         run_cv_front_half_on_context(context, cv_config)
+        post_run_result = run_post_run_public_flow(
+            context,
+            save_directory=save_directory,
+            file_name=output_name,
+        )
+        _append_workflow_event(
+            context,
+            "workflow_segment_saved",
+            {
+                "segment_id": segment.segment_id,
+                "display_name": segment.display_name,
+                "file_path": post_run_result["save"]["file_path"],
+                "run_poll_count": post_run_result["run_finish"]["poll_count"],
+            },
+        )
+        return
+
+    if segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION:
+        eis_config = build_eis_front_half_config_for_segment(segment)
+        output_name = build_output_filename_for_segment(segment)
+        if output_name is None:
+            raise RuntimeError(f"Missing output filename for segment {segment.segment_id!r}.")
+
+        run_eis_front_half_on_context(context, eis_config)
         post_run_result = run_post_run_public_flow(
             context,
             save_directory=save_directory,

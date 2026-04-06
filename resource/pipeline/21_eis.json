@@ -1,1 +1,12 @@
-{}
+{
+  "EIS_InputHighFrequency_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "EIS_InputLowFrequency_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  }
+}
