@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 @dataclass(slots=True)
 class EISFrontHalfConfig:
+    init_potential_v: str = "0"
     high_frequency_hz: str = "1000000"
     low_frequency_hz: str = "0.01"
 

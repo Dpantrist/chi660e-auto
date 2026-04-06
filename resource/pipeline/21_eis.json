@@ -1,4 +1,9 @@
 {
+  "EIS_InputInitPotential_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
   "EIS_InputHighFrequency_Apply": {
     "recognition": "DirectHit",
     "action": "InputText",

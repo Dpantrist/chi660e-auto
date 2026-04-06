@@ -56,6 +56,13 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         max_attempts=2,
         allow_pipeline_fallback=True,
     ),
+    "Main_ClickControl": VisualActionSpec(
+        name="Main_ClickControl",
+        template="main/main_btn_control_usable.png",
+        mode=VisualActionMode.BOX_CENTER_CLICK,
+        max_attempts=1,
+        allow_pipeline_fallback=False,
+    ),
     "Main_ClickRun": VisualActionSpec(
         name="Main_ClickRun",
         template="main/main_btn_run_usable.png",
@@ -186,6 +193,17 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
     "EIS_FocusHighFrequency": VisualActionSpec(
         name="EIS_FocusHighFrequency",
         template="eis/eis_label_high_frequency.png",
+        mode=VisualActionMode.WINDOW_FIXED_COLUMN_ROW_CLICK,
+        column_x1=286,
+        column_x2=444,
+        row_top_offset=2,
+        row_height=37,
+        max_attempts=1,
+        allow_pipeline_fallback=False,
+    ),
+    "EIS_FocusInitPotential": VisualActionSpec(
+        name="EIS_FocusInitPotential",
+        template="eis/eis_label_init_potential.png",
         mode=VisualActionMode.WINDOW_FIXED_COLUMN_ROW_CLICK,
         column_x1=286,
         column_x2=444,

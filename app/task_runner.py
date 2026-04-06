@@ -7,7 +7,11 @@ visual_action_specs, and pipeline JSON is used only as atomic action or
 fallback shells where explicitly retained.
 """
 
+import ctypes
+import ctypes.wintypes
+import re
 import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +50,7 @@ from app.window_preset import (
 TECHNIQUE_WINDOW_KEYWORD = "Electrochemical Techniques"
 CV_PARAM_WINDOW_KEYWORD = "Cyclic Voltammetry Parameters"
 EIS_PARAM_WINDOW_KEYWORD = "A.C. Impedance Parameters"
+OCP_WINDOW_KEYWORD = "Open Circuit Potential"
 
 WINDOW_WAIT_TIMEOUT_SEC = 6.0
 WINDOW_WAIT_INTERVAL_SEC = 0.15
@@ -53,6 +58,26 @@ WINDOW_PRESET_VERIFY_RETRIES = 3
 MIN_ACTION_GAP_SEC = 1.0
 TECHNIQUE_STATE_SETTLE_SEC = 1.0
 TECHNIQUE_STATE_RECHECK_ATTEMPTS = 3
+CONTROL_MENU_OCP_OFFSET_X = 0
+CONTROL_MENU_OCP_OFFSET_Y = 275
+
+WM_GETTEXT = 0x000D
+WM_GETTEXTLENGTH = 0x000E
+BM_CLICK = 0x00F5
+SW_RESTORE = 9
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+
+USER32 = ctypes.windll.user32
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [
+        ("left", ctypes.c_long),
+        ("top", ctypes.c_long),
+        ("right", ctypes.c_long),
+        ("bottom", ctypes.c_long),
+    ]
 
 
 def _canonical_window_keyword(keyword: str | list[str]) -> str:
@@ -900,6 +925,264 @@ def _wait_for_window_close(keyword: str, timeout_sec: float = WINDOW_WAIT_TIMEOU
     raise Chi660eAutoError(f"Timed out waiting for window {keyword!r} to close.")
 
 
+def _normalize_ui_text(text: str | None) -> str:
+    return re.sub(r"\s+", "", text or "").lower()
+
+
+def _window_text_by_hwnd(hwnd: int) -> str:
+    length = USER32.GetWindowTextLengthW(ctypes.c_void_p(hwnd))
+    if length > 0:
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        USER32.GetWindowTextW(ctypes.c_void_p(hwnd), buffer, len(buffer))
+        if buffer.value:
+            return buffer.value
+
+    message_length = int(USER32.SendMessageW(ctypes.c_void_p(hwnd), WM_GETTEXTLENGTH, 0, 0))
+    if message_length <= 0:
+        return ""
+    buffer = ctypes.create_unicode_buffer(message_length + 1)
+    USER32.SendMessageW(ctypes.c_void_p(hwnd), WM_GETTEXT, len(buffer), buffer)
+    return buffer.value
+
+
+def _class_name_by_hwnd(hwnd: int) -> str:
+    buffer = ctypes.create_unicode_buffer(256)
+    USER32.GetClassNameW(ctypes.c_void_p(hwnd), buffer, len(buffer))
+    return buffer.value
+
+
+def _window_rect_by_hwnd(hwnd: int) -> tuple[int, int, int, int]:
+    rect = RECT()
+    USER32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rect))
+    return (
+        int(rect.left),
+        int(rect.top),
+        int(rect.right - rect.left),
+        int(rect.bottom - rect.top),
+    )
+
+
+def _enum_child_controls(hwnd: int, *, visible_only: bool = True) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def callback(child_hwnd, _lparam):
+        child = int(child_hwnd)
+        if visible_only and not USER32.IsWindowVisible(ctypes.c_void_p(child)):
+            return True
+        children.append(
+            {
+                "hwnd": child,
+                "class_name": _class_name_by_hwnd(child),
+                "text": _window_text_by_hwnd(child),
+                "rect": _window_rect_by_hwnd(child),
+            }
+        )
+        return True
+
+    USER32.EnumChildWindows(ctypes.c_void_p(hwnd), callback, 0)
+    return children
+
+
+def _find_nearest_control_to_label(
+    children: list[dict[str, Any]],
+    label_keywords: tuple[str, ...],
+    allowed_classes: tuple[str, ...],
+) -> dict[str, Any] | None:
+    normalized_keywords = tuple(_normalize_ui_text(item) for item in label_keywords)
+    labels = [
+        child
+        for child in children
+        if child["text"]
+        and any(keyword in _normalize_ui_text(child["text"]) for keyword in normalized_keywords)
+    ]
+    if not labels:
+        return None
+
+    best_candidate: dict[str, Any] | None = None
+    best_rank: tuple[float, float, float] | None = None
+    for label in labels:
+        lx, ly, lw, lh = label["rect"]
+        label_right = lx + lw
+        label_mid_y = ly + (lh / 2.0)
+        for child in children:
+            if child["hwnd"] == label["hwnd"] or child["class_name"] not in allowed_classes:
+                continue
+            cx, cy, cw, ch = child["rect"]
+            if cx + cw <= label_right:
+                continue
+            vertical_delta = abs((cy + (ch / 2.0)) - label_mid_y)
+            horizontal_delta = max(0.0, cx - label_right)
+            rank = (vertical_delta, horizontal_delta, -float(cw))
+            if best_rank is None or rank < best_rank:
+                best_rank = rank
+                best_candidate = child
+    return best_candidate
+
+
+def _click_screen_point(x: int, y: int) -> None:
+    USER32.SetCursorPos(int(x), int(y))
+    USER32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    USER32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+
+def _click_window_center_by_hwnd(hwnd: int) -> None:
+    left, top, width, height = _window_rect_by_hwnd(hwnd)
+    _click_screen_point(left + max(1, width // 2), top + max(1, height // 2))
+
+
+def _find_ocp_value_control(ocp_window) -> dict[str, Any]:
+    children = _enum_child_controls(ocp_window.hwnd)
+    control = _find_nearest_control_to_label(
+        children,
+        ("Open Circuit Potential",),
+        ("Edit", "Static"),
+    )
+    if control is None:
+        raise Chi660eAutoError("Failed to resolve OCP value control from result window.")
+    return control
+
+
+def _read_text_from_hwnd(hwnd: int) -> str:
+    return _window_text_by_hwnd(hwnd).strip()
+
+
+def _format_decimal_value(value: Decimal) -> str:
+    normalized = value.normalize()
+    text = format(normalized, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _normalize_ocp_for_init_e(raw_text: str) -> str:
+    raw_compact = (raw_text or "").strip()
+    match = re.search(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", raw_compact)
+    if match is None:
+        raise Chi660eAutoError(f"Failed to parse OCP numeric value from text: {raw_text!r}")
+
+    try:
+        value = Decimal(match.group(0))
+    except (InvalidOperation, ValueError) as exc:
+        raise Chi660eAutoError(f"Failed to normalize OCP value: {raw_text!r}") from exc
+
+    if value < 0:
+        return "0"
+    return _format_decimal_value(value)
+
+
+def _find_ocp_ok_button(ocp_window) -> dict[str, Any] | None:
+    children = _enum_child_controls(ocp_window.hwnd)
+    for child in children:
+        if child["class_name"] != "Button":
+            continue
+        if _normalize_ui_text(child["text"]) in {"ok", "确定"}:
+            return child
+    return None
+
+
+def _click_ocp_dialog_ok(context: RuntimeContext, ocp_window) -> None:
+    button = _find_ocp_ok_button(ocp_window)
+    if button is None:
+        raise Chi660eAutoError("Failed to find OK button in OCP window.")
+
+    _enforce_min_action_gap(context, "ocp_dialog_ok")
+    USER32.ShowWindow(ctypes.c_void_p(ocp_window.hwnd), SW_RESTORE)
+    USER32.SetForegroundWindow(ctypes.c_void_p(ocp_window.hwnd))
+    USER32.SendMessageW(ctypes.c_void_p(button["hwnd"]), BM_CLICK, 0, 0)
+    _mark_action_completed(context)
+    time.sleep(WINDOW_WAIT_INTERVAL_SEC)
+
+    if any(OCP_WINDOW_KEYWORD.lower() in window.title.lower() for window in list_desktop_windows()):
+        _enforce_min_action_gap(context, "ocp_dialog_ok_physical")
+        _click_window_center_by_hwnd(button["hwnd"])
+        _mark_action_completed(context)
+
+    _wait_for_window_close(OCP_WINDOW_KEYWORD)
+    context.logger.info("OCP dialog OK clicked.")
+
+
+def _click_open_circuit_potential_from_control_menu(context: RuntimeContext) -> None:
+    context.logger.info("Main control menu click start.")
+    control_result = _run_visual_action_click(context, "Main_ClickControl")
+    context.logger.info("Main control menu click succeeded.")
+
+    anchor_point = control_result.click_point
+    if anchor_point is None and control_result.box is not None:
+        anchor_point = (
+            int(control_result.box[0] + (control_result.box[2] / 2)),
+            int(control_result.box[1] + (control_result.box[3] / 2)),
+        )
+    if anchor_point is None:
+        raise Chi660eAutoError("Control menu anchor point is missing.")
+
+    ocp_click_point = (
+        int(anchor_point[0] + CONTROL_MENU_OCP_OFFSET_X),
+        int(anchor_point[1] + CONTROL_MENU_OCP_OFFSET_Y),
+    )
+    _enforce_min_action_gap(context, "click:Main_ControlMenu:OpenCircuitPotential")
+    click_point(
+        context.controller,
+        ocp_click_point[0],
+        ocp_click_point[1],
+        ocp_click_point,
+    )
+    _mark_action_completed(context)
+    context.logger.info(
+        "Open Circuit Potential menu fixed-offset click: anchor=%s offset=(%s,%s) point=%s",
+        anchor_point,
+        CONTROL_MENU_OCP_OFFSET_X,
+        CONTROL_MENU_OCP_OFFSET_Y,
+        ocp_click_point,
+    )
+    context.logger.info("Checking OCP result window after control menu action.")
+
+
+def _read_open_circuit_potential_value(context: RuntimeContext, ocp_window) -> str:
+    context.logger.info(
+        "OCP window detected: title=%s class=%s",
+        ocp_window.title,
+        ocp_window.class_name,
+    )
+    control = _find_ocp_value_control(ocp_window)
+    context.logger.info(
+        "OCP value control resolved: hwnd=%s class=%s method=label_association",
+        control["hwnd"],
+        control["class_name"],
+    )
+    raw_text = _read_text_from_hwnd(control["hwnd"])
+    context.logger.info("OCP raw text read: %s", raw_text)
+    return raw_text
+
+
+def _read_and_close_open_circuit_potential(context: RuntimeContext) -> dict[str, str]:
+    context.logger.info("Open circuit potential read start.")
+    _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "ocp_main_initial")
+    _click_open_circuit_potential_from_control_menu(context)
+    _bind_context_to_window(
+        context,
+        OCP_WINDOW_KEYWORD,
+        "ocp_result_window",
+        timeout_sec=WINDOW_WAIT_TIMEOUT_SEC,
+        interval_sec=WINDOW_WAIT_INTERVAL_SEC,
+    )
+    if context.linked_window is None:
+        raise Chi660eAutoError("OCP result window was detected but runtime context was not bound.")
+    ocp_window = context.linked_window
+
+    raw_text = _read_open_circuit_potential_value(context, ocp_window)
+    normalized_value = _normalize_ocp_for_init_e(raw_text)
+    context.logger.info("OCP raw: %s", raw_text)
+    context.logger.info("OCP normalized for Init E: raw=%s normalized=%s", raw_text, normalized_value)
+
+    _click_ocp_dialog_ok(context, ocp_window)
+    _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "ocp_main_final")
+    return {
+        "raw_text": raw_text,
+        "normalized_value": normalized_value,
+    }
+
+
 def _bind_context_to_window(
     context: RuntimeContext,
     keyword: str | list[str],
@@ -1572,6 +1855,13 @@ def _run_eis_front_half_visual_form_once(
     context: RuntimeContext,
     config: EISFrontHalfConfig,
 ) -> None:
+    context.logger.info("EIS init E input start/value=%s", config.init_potential_v)
+    _run_text_input_field(
+        context,
+        "EIS_FocusInitPotential",
+        "EIS_InputInitPotential_Apply",
+        config.init_potential_v,
+    )
     context.logger.info("EIS high frequency input start/value=%s", config.high_frequency_hz)
     _run_text_input_field(
         context,
@@ -1633,6 +1923,33 @@ def wait_for_window_close_by_keyword(keyword: str, timeout_sec: float = WINDOW_W
     _wait_for_window_close(keyword, timeout_sec=timeout_sec)
 
 
+def run_open_circuit_potential_on_context(context: RuntimeContext) -> dict[str, str]:
+    return _read_and_close_open_circuit_potential(context)
+
+
+def run_open_circuit_potential() -> dict[str, str]:
+    context = bootstrap_app()
+
+    try:
+        result = run_open_circuit_potential_on_context(context)
+        print(f"OCP raw: {result['raw_text']}")
+        print(f"OCP normalized for Init E: {result['normalized_value']}")
+        if context.replay_record is not None:
+            finalize_session(context.replay_record, status="completed")
+        return result
+    except Exception as exc:
+        context.logger.exception("Open circuit potential flow failed.")
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "error",
+                {"message": str(exc), "stage": "open_circuit_potential"},
+                level="ERROR",
+            )
+            finalize_session(context.replay_record, status="error", error=str(exc))
+        raise
+
+
 def run_cv_front_half_on_context(
     context: RuntimeContext,
     config: CVFrontHalfConfig,
@@ -1682,11 +1999,15 @@ def run_eis_front_half_on_context(
     context: RuntimeContext,
     config: EISFrontHalfConfig,
 ) -> RuntimeContext:
+    ocp_result = _read_and_close_open_circuit_potential(context)
+    config.init_potential_v = ocp_result["normalized_value"]
+
     if context.replay_record is not None:
         append_event(
             context.replay_record,
             "eis_front_half_start",
             {
+                "init_potential_v": config.init_potential_v,
                 "high_frequency_hz": config.high_frequency_hz,
                 "low_frequency_hz": config.low_frequency_hz,
             },

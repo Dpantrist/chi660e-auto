@@ -10,7 +10,7 @@ from app.bootstrap import (
 )
 from app.gui_app import launch_workflow_gui
 from app.paths import BASE_DIR
-from app.task_runner import run_cv_front_half, run_eis_front_half
+from app.task_runner import run_cv_front_half, run_eis_front_half, run_open_circuit_potential
 from app.workflow_runner import run_default_workflow, run_workflow_segments
 from app.workflow_segments import build_eis_after_activation_segment
 
@@ -33,6 +33,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--run-eis-front-half",
         action="store_true",
         help="只跑 EIS 前半圈调试：Technique -> A.C. Impedance Parameters -> 填参 -> OK。",
+    )
+    debug_group.add_argument(
+        "--run-open-circuit-potential",
+        action="store_true",
+        help="只跑 Open Circuit Potential 读取调试：Control -> OCP 窗口 -> 读取数值 -> OK。",
     )
 
     workflow_group = parser.add_argument_group("Workflow 入口")
@@ -92,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.run_eis_front_half:
         return _run_with_handled_errors(run_eis_front_half)
+
+    if args.run_open_circuit_potential:
+        return _run_with_handled_errors(run_open_circuit_potential)
 
     if args.run_cv_front_half:
         return _run_with_handled_errors(run_cv_front_half)
