@@ -10,6 +10,7 @@ MODULES = [
     "app.dto",
     "app.cv_config",
     "app.eis_config",
+    "app.gcd_config",
     "app.logging_utils",
     "app.window_linker",
     "app.window_preset",

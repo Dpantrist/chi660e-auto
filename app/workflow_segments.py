@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """工作流任务段模型。
 
-这里定义可排序、可启停、可序列化的任务段结构。流程执行由 workflow_runner
-负责，具体视觉几何仍由 visual_action_specs 负责。
+这里定义可排序、可启停、可序列化的任务段结构。流程执行由
+workflow_runner 负责，具体视觉几何仍由 visual_action_specs 负责。
 """
 
 from dataclasses import dataclass, field
@@ -12,6 +12,15 @@ from typing import Any
 
 from app.cv_config import CVFrontHalfConfig
 from app.eis_config import EISFrontHalfConfig, get_default_eis_front_half_config
+from app.gcd_config import (
+    DEFAULT_GCD_CURRENT_DENSITY_CANDIDATES_MA_CM2,
+    DEFAULT_GCD_DATA_STORAGE_INTERVAL_SEC,
+    DEFAULT_GCD_ELECTRODE_AREA_CM2,
+    DEFAULT_GCD_HIGH_E_LIMIT_MV,
+    DEFAULT_GCD_NUMBER_OF_SEGMENTS,
+    GCDFrontHalfConfig,
+    build_gcd_run_values,
+)
 from app.naming_rules import (
     build_activation_cv_filename,
     build_cv_filename,
@@ -24,22 +33,7 @@ from app.naming_rules import (
 
 DEFAULT_ACTIVATION_SCAN_RATE_VS = 0.2
 DEFAULT_CV_SCAN_RATE_SERIES_MV = [2, 5, 10, 25, 50, 75, 100, 150, 200, 250, 300]
-DEFAULT_GCD_CURRENT_DENSITY_SERIES_MA_CM2 = [
-    0.1,
-    0.25,
-    0.5,
-    1,
-    1.5,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-    8,
-    9,
-    10,
-]
+DEFAULT_GCD_CURRENT_DENSITY_SERIES_MA_CM2 = list(DEFAULT_GCD_CURRENT_DENSITY_CANDIDATES_MA_CM2)
 DEFAULT_REST_DURATION_SEC = 600
 
 
@@ -63,16 +57,13 @@ class WorkflowSegment:
     params: dict[str, Any] = field(default_factory=dict)
 
 
-def calculate_gcd_current_a(current_density_ma_cm2: float | str, electrode_area_cm2: float | str) -> float:
-    return float(current_density_ma_cm2) * float(electrode_area_cm2) * 0.001
-
-
 def segment_block_reason(segment: WorkflowSegment) -> str | None:
     if segment.segment_type in {
         WorkflowSegmentType.ACTIVATION_CV,
         WorkflowSegmentType.EIS_AFTER_ACTIVATION,
         WorkflowSegmentType.CV_SERIES_ITEM,
         WorkflowSegmentType.REST,
+        WorkflowSegmentType.GCD_SERIES_ITEM,
     }:
         return None
 
@@ -81,9 +72,6 @@ def segment_block_reason(segment: WorkflowSegment) -> str | None:
         WorkflowSegmentType.EIS_AFTER_GCD,
     }:
         return "EIS 任务段已建模，但前半参数流程尚未接通。"
-
-    if segment.segment_type == WorkflowSegmentType.GCD_SERIES_ITEM:
-        return "GCD 任务段已建模，但前半参数流程尚未接通。"
 
     return f"Unknown segment type: {segment.segment_type.value!r}"
 
@@ -178,7 +166,10 @@ def build_eis_after_cv_segment(order: int) -> WorkflowSegment:
 def build_gcd_series_item_segment(
     order: int,
     current_density_ma_cm2: float | int,
-    electrode_area_cm2: float,
+    electrode_area_cm2: float = DEFAULT_GCD_ELECTRODE_AREA_CM2,
+    high_e_limit_mv: float = DEFAULT_GCD_HIGH_E_LIMIT_MV,
+    data_storage_interval_sec: str = DEFAULT_GCD_DATA_STORAGE_INTERVAL_SEC,
+    number_of_segments: str = DEFAULT_GCD_NUMBER_OF_SEGMENTS,
 ) -> WorkflowSegment:
     return WorkflowSegment(
         segment_id=f"gcd_{current_density_ma_cm2}",
@@ -189,6 +180,9 @@ def build_gcd_series_item_segment(
         params={
             "current_density_ma_cm2": float(current_density_ma_cm2),
             "electrode_area_cm2": float(electrode_area_cm2),
+            "high_e_limit_mv": float(high_e_limit_mv),
+            "data_storage_interval_sec": str(data_storage_interval_sec),
+            "number_of_segments": str(number_of_segments),
         },
     )
 
@@ -257,6 +251,22 @@ def build_eis_front_half_config_for_segment(segment: WorkflowSegment) -> EISFron
     )
 
 
+def build_gcd_run_values_for_segment(segment: WorkflowSegment) -> dict[str, str]:
+    if segment.segment_type != WorkflowSegmentType.GCD_SERIES_ITEM:
+        raise NotImplementedError(
+            f"GCD run-value build is not implemented for segment type {segment.segment_type.value!r}."
+        )
+
+    config = GCDFrontHalfConfig(
+        electrode_area_cm2=float(segment.params["electrode_area_cm2"]),
+        current_density_ma_cm2_list=(float(segment.params["current_density_ma_cm2"]),),
+        high_e_limit_mv=float(segment.params["high_e_limit_mv"]),
+        data_storage_interval_sec=str(segment.params["data_storage_interval_sec"]),
+        number_of_segments=str(segment.params["number_of_segments"]),
+    )
+    return build_gcd_run_values(config, float(segment.params["current_density_ma_cm2"]))
+
+
 def build_output_filename_for_segment(segment: WorkflowSegment) -> str | None:
     if segment.segment_type == WorkflowSegmentType.ACTIVATION_CV:
         return build_activation_cv_filename(segment.params["scan_rate_vs"])
@@ -278,7 +288,7 @@ def sort_enabled_segments(segments: list[WorkflowSegment]) -> list[WorkflowSegme
 
 
 def build_default_segment_plan(
-    electrode_area_cm2: float = 1.0,
+    electrode_area_cm2: float = DEFAULT_GCD_ELECTRODE_AREA_CM2,
     rest_duration_sec: int = DEFAULT_REST_DURATION_SEC,
 ) -> list[WorkflowSegment]:
     order = 1
@@ -319,8 +329,7 @@ def build_default_runnable_segment_plan() -> list[WorkflowSegment]:
 
 
 def _format_number(value: float | int) -> str:
-    text = f"{float(value):g}"
-    return text
+    return f"{float(value):g}"
 
 
 def _format_mv(scan_rate_vs: float) -> str:

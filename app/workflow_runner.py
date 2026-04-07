@@ -15,12 +15,17 @@ from app.errors import Chi660eAutoError
 from app.post_run_flow import run_post_run_public_flow
 from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
-from app.task_runner import run_cv_front_half_on_context, run_eis_front_half_on_context
+from app.task_runner import (
+    run_cv_front_half_on_context,
+    run_eis_front_half_on_context,
+    run_gcd_front_half_on_context,
+)
 from app.workflow_segments import (
     WorkflowSegment,
     WorkflowSegmentType,
     build_cv_front_half_config_for_segment,
     build_eis_front_half_config_for_segment,
+    build_gcd_run_values_for_segment,
     build_default_runnable_segment_plan,
     build_output_filename_for_segment,
     segment_block_reason,
@@ -151,6 +156,39 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
         )
         return
 
+    if segment.segment_type == WorkflowSegmentType.GCD_SERIES_ITEM:
+        gcd_run_values = build_gcd_run_values_for_segment(segment)
+        output_name = build_output_filename_for_segment(segment)
+        if output_name is None:
+            raise RuntimeError(f"Missing output filename for segment {segment.segment_id!r}.")
+
+        context.logger.info(
+            "Workflow GCD run values: density=%s cathodic=%s anodic=%s high_e=%s",
+            gcd_run_values["density_label_text"],
+            gcd_run_values["cathodic_current_a_text"],
+            gcd_run_values["anodic_current_a_text"],
+            gcd_run_values["high_e_limit_v_text"],
+        )
+
+        run_gcd_front_half_on_context(context, gcd_run_values)
+        post_run_result = run_post_run_public_flow(
+            context,
+            save_directory=save_directory,
+            file_name=output_name,
+        )
+        _append_workflow_event(
+            context,
+            "workflow_segment_saved",
+            {
+                "segment_id": segment.segment_id,
+                "display_name": segment.display_name,
+                "density": gcd_run_values["density_label_text"],
+                "file_path": post_run_result["save"]["file_path"],
+                "run_poll_count": post_run_result["run_finish"]["poll_count"],
+            },
+        )
+        return
+
     if segment_is_rest(segment):
         _run_rest_segment(context, segment)
         return
@@ -175,12 +213,13 @@ def run_workflow_segments(
         for index, segment in enumerate(ordered_segments, start=1):
             output_name = build_output_filename_for_segment(segment)
             runtime_context.logger.info(
-                "Workflow segment start: index=%s/%s type=%s name=%s output=%s",
+                "Workflow segment start: index=%s/%s type=%s name=%s output=%s density=%s",
                 index,
                 len(ordered_segments),
                 segment.segment_type.value,
                 segment.display_name,
                 output_name,
+                segment.params.get("current_density_ma_cm2"),
             )
             _append_workflow_event(
                 runtime_context,
@@ -192,6 +231,7 @@ def run_workflow_segments(
                     "segment_type": segment.segment_type.value,
                     "display_name": segment.display_name,
                     "output_name": output_name,
+                    "density": segment.params.get("current_density_ma_cm2"),
                 },
             )
 

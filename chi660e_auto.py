@@ -8,11 +8,17 @@ from app.bootstrap import (
     is_main_window_connection_failure,
     main as bootstrap_main,
 )
+from app.gcd_config import get_default_gcd_front_half_config
 from app.gui_app import launch_workflow_gui
 from app.paths import BASE_DIR
-from app.task_runner import run_cv_front_half, run_eis_front_half, run_open_circuit_potential
+from app.task_runner import (
+    run_cv_front_half,
+    run_eis_front_half,
+    run_gcd_front_half,
+    run_open_circuit_potential,
+)
 from app.workflow_runner import run_default_workflow, run_workflow_segments
-from app.workflow_segments import build_eis_after_activation_segment
+from app.workflow_segments import build_eis_after_activation_segment, build_gcd_series_item_segment
 
 
 DEFAULT_SAVE_DIRECTORY = BASE_DIR / "tests" / "test_data"
@@ -35,9 +41,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="只跑 EIS 前半圈调试：Technique -> A.C. Impedance Parameters -> 填参 -> OK。",
     )
     debug_group.add_argument(
+        "--run-gcd-front-half",
+        action="store_true",
+        help="只跑 GCD 前半圈调试：Technique -> Chronopotentiometry Parameters -> 填参 -> OK。",
+    )
+    debug_group.add_argument(
         "--run-open-circuit-potential",
         action="store_true",
-        help="只跑 Open Circuit Potential 读取调试：Control -> OCP 窗口 -> 读取数值 -> OK。",
+        help="只跑 Open Circuit Potential 读取调试：Control -> OCP 窗口 -> 读值 -> OK。",
     )
 
     workflow_group = parser.add_argument_group("Workflow 入口")
@@ -50,6 +61,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--run-eis-workflow",
         action="store_true",
         help="运行最小 EIS workflow（当前为单段 eis_after_activation 完整闭环）。",
+    )
+    workflow_group.add_argument(
+        "--run-gcd-workflow",
+        action="store_true",
+        help="运行最小 GCD workflow（当前为单电流密度 2 mA/cm^2 完整闭环）。",
     )
 
     gui_group = parser.add_argument_group("GUI 入口")
@@ -82,6 +98,22 @@ def _run_eis_workflow_entry() -> None:
     run_workflow_segments(segments, save_directory=DEFAULT_SAVE_DIRECTORY)
 
 
+def _run_gcd_workflow_entry() -> None:
+    config = get_default_gcd_front_half_config()
+    density = float(config.current_density_ma_cm2_list[0])
+    segments = [
+        build_gcd_series_item_segment(
+            order=1,
+            current_density_ma_cm2=density,
+            electrode_area_cm2=config.electrode_area_cm2,
+            high_e_limit_mv=config.high_e_limit_mv,
+            data_storage_interval_sec=config.data_storage_interval_sec,
+            number_of_segments=config.number_of_segments,
+        )
+    ]
+    run_workflow_segments(segments, save_directory=DEFAULT_SAVE_DIRECTORY)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -95,8 +127,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.run_eis_workflow:
         return _run_with_handled_errors(_run_eis_workflow_entry)
 
+    if args.run_gcd_workflow:
+        return _run_with_handled_errors(_run_gcd_workflow_entry)
+
     if args.run_eis_front_half:
         return _run_with_handled_errors(run_eis_front_half)
+
+    if args.run_gcd_front_half:
+        return _run_with_handled_errors(run_gcd_front_half)
 
     if args.run_open_circuit_potential:
         return _run_with_handled_errors(run_open_circuit_potential)

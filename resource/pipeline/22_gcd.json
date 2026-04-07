@@ -1,1 +1,32 @@
-{}
+{
+  "GCD_InputCathodicCurrent_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "GCD_InputAnodicCurrent_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "GCD_InputHighELimit_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "GCD_InputLowELimit_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "GCD_InputDataStorageIntvl_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "GCD_InputNumberOfSegments_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  }
+}

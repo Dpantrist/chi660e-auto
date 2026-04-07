@@ -120,6 +120,9 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
                     order=order,
                     current_density_ma_cm2=current_density,
                     electrode_area_cm2=state.electrode_area_cm2,
+                    high_e_limit_mv=state.gcd_high_e_limit_mv,
+                    data_storage_interval_sec=state.gcd_data_storage_interval_sec,
+                    number_of_segments=state.gcd_number_of_segments,
                 )
                 segment.enabled = state.enable_gcd_series
                 segments.append(segment)

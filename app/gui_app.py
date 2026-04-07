@@ -23,7 +23,7 @@ def launch_workflow_gui() -> None:
     state = build_default_gui_state()
     root = tk.Tk()
     root.title("CHI660E Workflow Planner")
-    root.geometry("980x760")
+    root.geometry("980x820")
 
     save_directory_var = tk.StringVar(value=state.save_directory)
     electrode_area_var = tk.StringVar(value=str(state.electrode_area_cm2))
@@ -33,6 +33,9 @@ def launch_workflow_gui() -> None:
     activation_sensitivity_var = tk.StringVar(value=state.activation_sensitivity)
     cv_series_var = tk.StringVar(value=",".join(str(item) for item in state.cv_scan_rates_mv))
     gcd_series_var = tk.StringVar(value=",".join(str(item) for item in state.gcd_current_densities_ma_cm2))
+    gcd_high_e_limit_mv_var = tk.StringVar(value=str(state.gcd_high_e_limit_mv))
+    gcd_data_storage_interval_var = tk.StringVar(value=state.gcd_data_storage_interval_sec)
+    gcd_number_of_segments_var = tk.StringVar(value=state.gcd_number_of_segments)
     rest_duration_var = tk.StringVar(value=str(state.rest_duration_sec))
     status_var = tk.StringVar(value="就绪")
 
@@ -59,6 +62,9 @@ def launch_workflow_gui() -> None:
             activation_sensitivity=activation_sensitivity_var.get().strip(),
             cv_scan_rates_mv=parse_numeric_series(cv_series_var.get()),
             gcd_current_densities_ma_cm2=parse_numeric_series(gcd_series_var.get()),
+            gcd_high_e_limit_mv=float(gcd_high_e_limit_mv_var.get().strip()),
+            gcd_data_storage_interval_sec=gcd_data_storage_interval_var.get().strip(),
+            gcd_number_of_segments=gcd_number_of_segments_var.get().strip(),
             rest_duration_sec=int(rest_duration_var.get().strip()),
             segment_order=[str(order_listbox.get(index)) for index in range(order_listbox.size())],
             enable_activation_cv=enable_vars["activation_cv"].get(),
@@ -202,8 +208,17 @@ def launch_workflow_gui() -> None:
     ttk.Label(config_frame, text="GCD 序列 (mA/cm²)").grid(row=7, column=0, sticky="w", padx=6, pady=4)
     ttk.Entry(config_frame, textvariable=gcd_series_var).grid(row=7, column=1, sticky="ew", padx=6, pady=4)
 
-    ttk.Label(config_frame, text="静置时长(s)").grid(row=8, column=0, sticky="w", padx=6, pady=4)
-    ttk.Entry(config_frame, textvariable=rest_duration_var).grid(row=8, column=1, sticky="ew", padx=6, pady=4)
+    ttk.Label(config_frame, text="GCD High E Limit (mV)").grid(row=8, column=0, sticky="w", padx=6, pady=4)
+    ttk.Entry(config_frame, textvariable=gcd_high_e_limit_mv_var).grid(row=8, column=1, sticky="ew", padx=6, pady=4)
+
+    ttk.Label(config_frame, text="GCD Data Storage Intvl").grid(row=9, column=0, sticky="w", padx=6, pady=4)
+    ttk.Entry(config_frame, textvariable=gcd_data_storage_interval_var).grid(row=9, column=1, sticky="ew", padx=6, pady=4)
+
+    ttk.Label(config_frame, text="GCD Number of Segments").grid(row=10, column=0, sticky="w", padx=6, pady=4)
+    ttk.Entry(config_frame, textvariable=gcd_number_of_segments_var).grid(row=10, column=1, sticky="ew", padx=6, pady=4)
+
+    ttk.Label(config_frame, text="静置时长(s)").grid(row=11, column=0, sticky="w", padx=6, pady=4)
+    ttk.Entry(config_frame, textvariable=rest_duration_var).grid(row=11, column=1, sticky="ew", padx=6, pady=4)
 
     segment_frame = ttk.LabelFrame(root, text="任务段启停")
     segment_frame.grid(row=1, column=0, padx=12, pady=8, sticky="nsew")

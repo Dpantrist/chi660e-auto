@@ -29,6 +29,11 @@ from app.cv_config import CVFrontHalfConfig, get_default_cv_front_half_config
 from app.dto import WindowSession
 from app.eis_config import EISFrontHalfConfig, get_default_eis_front_half_config
 from app.errors import Chi660eAutoError, WindowNotFoundError
+from app.gcd_config import (
+    GCDFrontHalfConfig,
+    build_gcd_run_values,
+    get_default_gcd_front_half_config,
+)
 from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
 from app.screenshot_manager import save_debug_capture, save_replay_capture
@@ -50,6 +55,7 @@ from app.window_preset import (
 TECHNIQUE_WINDOW_KEYWORD = "Electrochemical Techniques"
 CV_PARAM_WINDOW_KEYWORD = "Cyclic Voltammetry Parameters"
 EIS_PARAM_WINDOW_KEYWORD = "A.C. Impedance Parameters"
+GCD_PARAM_WINDOW_KEYWORD = "Chronopotentiometry Parameters"
 OCP_WINDOW_KEYWORD = "Open Circuit Potential"
 
 WINDOW_WAIT_TIMEOUT_SEC = 6.0
@@ -1432,6 +1438,98 @@ def _run_techniques_select_eis_and_confirm(context: RuntimeContext) -> None:
     raise Chi660eAutoError("Technique OK click failed.")
 
 
+def _confirm_technique_gcd_selected_after_click(context: RuntimeContext) -> bool:
+    context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
+    time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+
+    for attempt in range(1, TECHNIQUE_STATE_RECHECK_ATTEMPTS + 1):
+        selected_result = _run_visual_action_once(context, "Techniques_SelectGCD_Selected_Check")
+        context.logger.info(
+            "Technique GCD selected recheck: attempt=%s matched=%s score=%.6f",
+            attempt,
+            selected_result.matched,
+            selected_result.score,
+        )
+        if selected_result.matched:
+            context.logger.info("Technique selection confirmed by selected-check")
+            return True
+
+        unselected_result = _run_visual_action_once(context, "Techniques_SelectGCD_Unselected_Check")
+        context.logger.info(
+            "Technique GCD unselected recheck: attempt=%s matched=%s score=%.6f",
+            attempt,
+            unselected_result.matched,
+            unselected_result.score,
+        )
+        if not unselected_result.matched:
+            context.logger.info("Technique selection confirmed by unselected disappearance")
+            return True
+
+        if attempt < TECHNIQUE_STATE_RECHECK_ATTEMPTS:
+            context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
+            time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+
+    return False
+
+
+def _run_techniques_select_gcd_and_confirm(context: RuntimeContext) -> None:
+    selected_result = _run_visual_action_once(context, "Techniques_SelectGCD_Selected_Check")
+    context.logger.info(
+        "Technique initial GCD selected check: matched=%s score=%.6f",
+        selected_result.matched,
+        selected_result.score,
+    )
+    if selected_result.matched:
+        context.logger.info("GCD item already selected: no click needed")
+        context.logger.info(
+            "Visual action skipped click: name=%s reason=already_selected",
+            "Techniques_SelectGCD_Unselected_Click",
+        )
+        _append_visual_action_event(
+            context,
+            "visual_action_skip_click",
+            get_visual_action_spec("Techniques_SelectGCD_Unselected_Click"),
+            selected_result,
+            {"reason": "already_selected"},
+        )
+    else:
+        unselected_result = _run_visual_action_once(context, "Techniques_SelectGCD_Unselected_Check")
+        context.logger.info(
+            "Technique initial GCD unselected check: matched=%s score=%.6f",
+            unselected_result.matched,
+            unselected_result.score,
+        )
+        if not unselected_result.matched:
+            raise Chi660eAutoError(
+                "Technique GCD state is ambiguous: neither selected nor unselected matched."
+            )
+
+        click_result = _run_visual_action_once(context, "Techniques_SelectGCD_Unselected_Click")
+        if not click_result.success:
+            raise Chi660eAutoError("Technique item click failed for unselected GCD item.")
+        context.logger.info("GCD item selected via unselected click")
+
+        if not _confirm_technique_gcd_selected_after_click(context):
+            context.logger.error("Technique selection failed after state recheck attempts")
+            raise Chi660eAutoError("Technique selection failed after state recheck attempts.")
+
+    for attempt in range(1, 3):
+        ok_result = _run_visual_action_once(context, "Techniques_ClickOK")
+        if ok_result.success:
+            context.logger.info("Visual action succeeded: name=%s", "Techniques_ClickOK")
+            _append_visual_action_event(
+                context,
+                "visual_action_succeeded",
+                get_visual_action_spec("Techniques_ClickOK"),
+                ok_result,
+            )
+            return
+        if attempt < 2:
+            context.logger.warning("Technique OK click retry: attempt=%s", attempt + 1)
+
+    raise Chi660eAutoError("Technique OK click failed.")
+
+
 def _bind_next_window_or_open_from_main(
     context: RuntimeContext,
     next_window_keyword: str | list[str],
@@ -1895,6 +1993,88 @@ def _run_eis_front_half_visual_form(
     _run_eis_front_half_visual_form_once(context, config)
 
 
+def _run_gcd_front_half_visual_form_once(
+    context: RuntimeContext,
+    run_values: dict[str, str],
+) -> None:
+    context.logger.info(
+        "GCD cathodic current input start/value=%s",
+        run_values["cathodic_current_a_text"],
+    )
+    _run_text_input_field(
+        context,
+        "GCD_FocusCathodicCurrent",
+        "GCD_InputCathodicCurrent_Apply",
+        run_values["cathodic_current_a_text"],
+    )
+    context.logger.info(
+        "GCD anodic current input start/value=%s",
+        run_values["anodic_current_a_text"],
+    )
+    _run_text_input_field(
+        context,
+        "GCD_FocusAnodicCurrent",
+        "GCD_InputAnodicCurrent_Apply",
+        run_values["anodic_current_a_text"],
+    )
+    context.logger.info(
+        "GCD high E limit input start/value=%s",
+        run_values["high_e_limit_v_text"],
+    )
+    _run_text_input_field(
+        context,
+        "GCD_FocusHighELimit",
+        "GCD_InputHighELimit_Apply",
+        run_values["high_e_limit_v_text"],
+    )
+    context.logger.info(
+        "GCD low E limit input start/value=%s",
+        run_values["low_e_limit_v_text"],
+    )
+    _run_text_input_field(
+        context,
+        "GCD_FocusLowELimit",
+        "GCD_InputLowELimit_Apply",
+        run_values["low_e_limit_v_text"],
+    )
+    context.logger.info(
+        "GCD data storage interval input start/value=%s",
+        run_values["data_storage_interval_text"],
+    )
+    _run_text_input_field(
+        context,
+        "GCD_FocusDataStorageIntvl",
+        "GCD_InputDataStorageIntvl_Apply",
+        run_values["data_storage_interval_text"],
+    )
+    context.logger.info(
+        "GCD number of segments input start/value=%s",
+        run_values["number_of_segments_text"],
+    )
+    _run_text_input_field(
+        context,
+        "GCD_FocusNumberOfSegments",
+        "GCD_InputNumberOfSegments_Apply",
+        run_values["number_of_segments_text"],
+    )
+
+    ok_result = _run_visual_action_click(context, "GCD_ClickOK")
+    _append_visual_action_event(
+        context,
+        "visual_action_succeeded",
+        get_visual_action_spec("GCD_ClickOK"),
+        ok_result,
+    )
+    _wait_for_window_close(GCD_PARAM_WINDOW_KEYWORD)
+
+
+def _run_gcd_front_half_visual_form(
+    context: RuntimeContext,
+    run_values: dict[str, str],
+) -> None:
+    _run_gcd_front_half_visual_form_once(context, run_values)
+
+
 def bind_runtime_context_to_window(
     context: RuntimeContext,
     keyword: str | list[str],
@@ -2042,6 +2222,53 @@ def run_eis_front_half_on_context(
     return context
 
 
+def run_gcd_front_half_on_context(
+    context: RuntimeContext,
+    run_values: dict[str, str],
+) -> RuntimeContext:
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "gcd_front_half_start",
+            {
+                "cathodic_current_a_text": run_values["cathodic_current_a_text"],
+                "anodic_current_a_text": run_values["anodic_current_a_text"],
+                "high_e_limit_v_text": run_values["high_e_limit_v_text"],
+                "data_storage_interval_text": run_values["data_storage_interval_text"],
+                "number_of_segments_text": run_values["number_of_segments_text"],
+                "density_label_text": run_values["density_label_text"],
+            },
+        )
+
+    _run_visual_action_expect_window_with_fallback(
+        context,
+        "Main_ClickTechnique",
+        "gcd_front_half_techniques_window",
+        "Main_ClickTechnique",
+    )
+    _run_techniques_select_gcd_and_confirm(context)
+    _bind_next_window_or_open_from_main(
+        context,
+        next_window_keyword=GCD_PARAM_WINDOW_KEYWORD,
+        direct_replay_name="gcd_front_half_param_window_direct",
+        main_rebind_replay_name="gcd_front_half_main_rebound",
+        main_click_spec_name="Main_ClickParametersGCD",
+        main_click_replay_name="gcd_front_half_param_window_initial",
+        pipeline_fallback_entry="Main_ClickParameters",
+        direct_wait_timeout=2.0,
+        direct_wait_interval=0.2,
+    )
+
+    _run_gcd_front_half_visual_form(context, run_values)
+    _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "gcd_front_half_main_final")
+
+    if context.replay_record is not None:
+        append_event(context.replay_record, "gcd_front_half_ready", {"window": MAIN_WINDOW_TITLE_CANDIDATES})
+
+    context.logger.info("GCD front-half flow completed.")
+    return context
+
+
 def run_cv_front_half(config: CVFrontHalfConfig | None = None) -> RuntimeContext:
     context = bootstrap_app()
     config = config or get_default_cv_front_half_config()
@@ -2089,6 +2316,34 @@ def run_eis_front_half(config: EISFrontHalfConfig | None = None) -> RuntimeConte
             finalize_session(context.replay_record, status="error", error=str(exc))
         try:
             _save_step_capture(context, "eis_front_half_error")
+        except Exception:
+            context.logger.exception("Failed to save runner error capture.")
+        raise
+
+
+def run_gcd_front_half(config: GCDFrontHalfConfig | None = None) -> RuntimeContext:
+    context = bootstrap_app()
+    config = config or get_default_gcd_front_half_config()
+
+    try:
+        density = float(config.current_density_ma_cm2_list[0])
+        run_values = build_gcd_run_values(config, density)
+        result = run_gcd_front_half_on_context(context, run_values)
+        if context.replay_record is not None:
+            finalize_session(context.replay_record, status="completed")
+        return result
+    except Exception as exc:
+        context.logger.exception("GCD front-half flow failed.")
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "error",
+                {"message": str(exc), "stage": "gcd_front_half"},
+                level="ERROR",
+            )
+            finalize_session(context.replay_record, status="error", error=str(exc))
+        try:
+            _save_step_capture(context, "gcd_front_half_error")
         except Exception:
             context.logger.exception("Failed to save runner error capture.")
         raise
