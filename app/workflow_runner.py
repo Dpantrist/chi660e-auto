@@ -143,6 +143,8 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
             context,
             save_directory=save_directory,
             file_name=output_name,
+            double_click_main_center_after_run=True,
+            double_click_main_center_delay_sec=10.0,
         )
         _append_workflow_event(
             context,

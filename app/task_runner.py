@@ -434,7 +434,37 @@ def _mark_action_completed(context: RuntimeContext) -> None:
     context.last_action_completed_at = time.monotonic()
 
 
-def _prepare_visual_task(context: RuntimeContext, entry: str) -> dict[str, Any]:
+def _prepare_visual_task(
+    context: RuntimeContext,
+    entry: str,
+    relocate_cursor_before_task: bool = True,
+) -> dict[str, Any]:
+    if not relocate_cursor_before_task:
+        result = {
+            "success": None,
+            "x": None,
+            "y": None,
+            "hwnd": context.linked_window.hwnd if context.linked_window is not None else None,
+            "reason": "post_run_polling",
+        }
+        context.logger.info(
+            "Cursor relocation skipped before task: entry=%s reason=%s",
+            entry,
+            result["reason"],
+        )
+        if context.replay_record is not None:
+            append_event(
+                context.replay_record,
+                "cursor_relocation_skipped_before_task",
+                {
+                    "entry": entry,
+                    "keyword": context.window_keyword,
+                    "title": context.linked_window.title if context.linked_window is not None else None,
+                    **result,
+                },
+            )
+        return result
+
     if context.linked_window is None:
         result = {
             "success": False,
@@ -664,13 +694,21 @@ def _log_visual_action_roi_policy(context: RuntimeContext, spec, result: VisualA
     )
 
 
-def _run_visual_action_once(context: RuntimeContext, spec_name: str) -> VisualActionResult:
+def _run_visual_action_once(
+    context: RuntimeContext,
+    spec_name: str,
+    relocate_cursor_before_task: bool = True,
+) -> VisualActionResult:
     spec = get_visual_action_spec(spec_name)
     _enforce_selected_state_spec(spec, intended_click=False)
     _ensure_context_window_ready_for_task(context)
     if spec.mode != VisualActionMode.DETECT_ONLY:
         _enforce_min_action_gap(context, f"visual:{spec.name}")
-    _prepare_visual_task(context, spec.name)
+    _prepare_visual_task(
+        context,
+        spec.name,
+        relocate_cursor_before_task=relocate_cursor_before_task,
+    )
 
     context.logger.info(
         "Visual action start: name=%s mode=%s template=%s",
@@ -2091,8 +2129,16 @@ def bind_runtime_context_to_window(
     )
 
 
-def run_visual_action_once_in_context(context: RuntimeContext, spec_name: str) -> VisualActionResult:
-    return _run_visual_action_once(context, spec_name)
+def run_visual_action_once_in_context(
+    context: RuntimeContext,
+    spec_name: str,
+    relocate_cursor_before_task: bool = True,
+) -> VisualActionResult:
+    return _run_visual_action_once(
+        context,
+        spec_name,
+        relocate_cursor_before_task=relocate_cursor_before_task,
+    )
 
 
 def run_visual_action_click_in_context(context: RuntimeContext, spec_name: str) -> VisualActionResult:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.constants import MAIN_WINDOW_TITLE_CANDIDATES
+from app.controller_manager import capture_once, post_double_click
 from app.errors import Chi660eAutoError
 from app.replay_manager import append_event
 from app.runtime_context import RuntimeContext
@@ -36,6 +37,35 @@ def _append_post_run_event(
 
 def _bind_main_window(context: RuntimeContext, capture_name: str) -> RuntimeContext:
     return bind_runtime_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, capture_name)
+
+
+def _double_click_main_window_center(context: RuntimeContext) -> dict[str, Any]:
+    if context.controller is None:
+        raise Chi660eAutoError("Controller is not initialized for center double-click.")
+
+    image = capture_once(context.controller)
+    if image is None or getattr(image, "shape", None) is None:
+        raise Chi660eAutoError("Main window capture is unavailable for center double-click.")
+
+    height, width = image.shape[:2]
+    point = (int(width // 2), int(height // 2))
+    context.logger.info("Post-run center double-click start: point=%s", point)
+    result = post_double_click(context.controller, point[0], point[1])
+    context.logger.info("Post-run center double-click succeeded: point=%s", point)
+    _append_post_run_event(
+        context,
+        "post_run_center_double_click_succeeded",
+        {
+            "point": point,
+            "interval_sec": result.get("interval_sec"),
+        },
+    )
+    return {
+        "success": True,
+        "point": point,
+        "capture_shape": (height, width),
+        "interval_sec": result.get("interval_sec"),
+    }
 
 
 def ensure_main_idle_before_run(context: RuntimeContext) -> dict[str, Any]:
@@ -130,7 +160,11 @@ def wait_until_run_finished(
         poll_count += 1
 
         try:
-            pause_usable = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
+            pause_usable = run_visual_action_once_in_context(
+                context,
+                "Main_CheckPauseUsable",
+                relocate_cursor_before_task=False,
+            )
             context.logger.info(
                 "Run finish poll: count=%s running=%s score=%.6f",
                 poll_count,
@@ -145,7 +179,11 @@ def wait_until_run_finished(
                 )
                 continue
 
-            pause_disabled = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
+            pause_disabled = run_visual_action_once_in_context(
+                context,
+                "Main_CheckPauseDisabled",
+                relocate_cursor_before_task=False,
+            )
             context.logger.info(
                 "Run finish disabled check: count=%s matched=%s score=%.6f",
                 poll_count,
@@ -162,7 +200,11 @@ def wait_until_run_finished(
                 continue
 
             time.sleep(RUN_FINISH_CONFIRM_SEC)
-            pause_disabled_confirm = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
+            pause_disabled_confirm = run_visual_action_once_in_context(
+                context,
+                "Main_CheckPauseDisabled",
+                relocate_cursor_before_task=False,
+            )
             if pause_disabled_confirm.matched:
                 result = {
                     "finished": True,
@@ -255,9 +297,34 @@ def run_post_run_public_flow(
     save_directory: str | Path,
     file_name: str,
     max_wait_sec: float | None = None,
+    double_click_main_center_after_run: bool = False,
+    double_click_main_center_delay_sec: float = 0.0,
 ) -> dict[str, Any]:
     idle_before = ensure_main_idle_before_run(context)
     run_start = start_run_and_confirm(context)
+    center_double_click_result: dict[str, Any] | None = None
+    if double_click_main_center_after_run:
+        context.logger.info(
+            "Post-run center double-click scheduled: delay_sec=%.1f",
+            double_click_main_center_delay_sec,
+        )
+        _append_post_run_event(
+            context,
+            "post_run_center_double_click_scheduled",
+            {"delay_sec": float(double_click_main_center_delay_sec)},
+        )
+        time.sleep(max(0.0, float(double_click_main_center_delay_sec)))
+        try:
+            center_double_click_result = _double_click_main_window_center(context)
+        except Exception as exc:
+            context.logger.error("Post-run center double-click failed: %s", exc)
+            _append_post_run_event(
+                context,
+                "post_run_center_double_click_failed",
+                {"error": str(exc)},
+                level="ERROR",
+            )
+            raise
     run_finish = wait_until_run_finished(context, max_wait_sec=max_wait_sec)
     save_result = save_result_via_save_as(context, save_directory, file_name)
     idle_after = ensure_main_idle_before_run(context)
@@ -265,6 +332,7 @@ def run_post_run_public_flow(
         "success": True,
         "idle_before": idle_before,
         "run_start": run_start,
+        "center_double_click": center_double_click_result,
         "run_finish": run_finish,
         "save": save_result,
         "idle_after": idle_after,
