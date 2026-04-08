@@ -7,12 +7,17 @@ from app.gcd_config import (
     build_gcd_run_values,
     get_default_gcd_front_half_config,
 )
-from app.gui_controller import build_default_execution_plan_preview, build_default_gui_state, build_segments_from_gui_state
+from app.gui_controller import (
+    build_default_execution_plan_preview,
+    build_default_gui_state,
+    build_segments_from_gui_state,
+)
 from app.workflow_runner import validate_workflow_segments
 from app.workflow_segments import (
     build_default_runnable_segment_plan,
     build_eis_after_activation_segment,
     build_eis_after_cv_segment,
+    build_eis_after_gcd_segment,
     build_gcd_run_values_for_segment,
     build_gcd_series_item_segment,
     build_output_filename_for_segment,
@@ -36,6 +41,22 @@ class WorkflowPlanTestCase(unittest.TestCase):
         self.assertEqual(segment.params["high_frequency_hz"], "1000000")
         self.assertEqual(segment.params["low_frequency_hz"], "0.01")
         self.assertEqual(build_output_filename_for_segment(segment), "EIS-after activation.txt")
+
+    def test_eis_after_cv_segment_is_valid(self) -> None:
+        segment = build_eis_after_cv_segment(order=1)
+        self.assertTrue(segment_is_runnable(segment))
+        self.assertEqual(validate_workflow_segments([segment]), [])
+        self.assertEqual(segment.params["high_frequency_hz"], "1000000")
+        self.assertEqual(segment.params["low_frequency_hz"], "0.01")
+        self.assertEqual(build_output_filename_for_segment(segment), "EIS-after cv.txt")
+
+    def test_eis_after_gcd_segment_is_valid(self) -> None:
+        segment = build_eis_after_gcd_segment(order=1)
+        self.assertTrue(segment_is_runnable(segment))
+        self.assertEqual(validate_workflow_segments([segment]), [])
+        self.assertEqual(segment.params["high_frequency_hz"], "1000000")
+        self.assertEqual(segment.params["low_frequency_hz"], "0.01")
+        self.assertEqual(build_output_filename_for_segment(segment), "EIS-after GCD.txt")
 
     def test_gcd_series_item_segment_is_valid(self) -> None:
         segment = build_gcd_series_item_segment(
@@ -64,11 +85,6 @@ class WorkflowPlanTestCase(unittest.TestCase):
         self.assertIn(2.0, DEFAULT_GCD_CURRENT_DENSITY_CANDIDATES_MA_CM2)
         run_values = build_gcd_run_values(config, 2.0)
         self.assertEqual(run_values["cathodic_current_a_text"], "0.002")
-
-    def test_modeled_but_unwired_segment_is_blocked(self) -> None:
-        issues = validate_workflow_segments([build_eis_after_cv_segment(order=1)])
-        self.assertEqual(len(issues), 1)
-        self.assertIn("尚未接通", issues[0]["reason"])
 
     def test_gui_default_preview_is_not_empty(self) -> None:
         state = build_default_gui_state()

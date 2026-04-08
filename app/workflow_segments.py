@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """工作流任务段模型。
 
-这里定义可排序、可启停、可序列化的任务段结构。流程执行由
-workflow_runner 负责，具体视觉几何仍由 visual_action_specs 负责。
+这里定义可排序、可启停、可序列化的任务段结构。
+workflow_runner 负责执行，visual_action_specs 继续负责视觉几何。
 """
 
 from dataclasses import dataclass, field
@@ -63,16 +63,11 @@ def segment_block_reason(segment: WorkflowSegment) -> str | None:
         WorkflowSegmentType.EIS_AFTER_ACTIVATION,
         WorkflowSegmentType.CV_SERIES_ITEM,
         WorkflowSegmentType.REST,
-        WorkflowSegmentType.GCD_SERIES_ITEM,
-    }:
-        return None
-
-    if segment.segment_type in {
         WorkflowSegmentType.EIS_AFTER_CV,
+        WorkflowSegmentType.GCD_SERIES_ITEM,
         WorkflowSegmentType.EIS_AFTER_GCD,
     }:
-        return "EIS 任务段已建模，但前半参数流程尚未接通。"
-
+        return None
     return f"Unknown segment type: {segment.segment_type.value!r}"
 
 
@@ -153,13 +148,21 @@ def build_rest_segment(order: int, duration_sec: int = DEFAULT_REST_DURATION_SEC
     )
 
 
-def build_eis_after_cv_segment(order: int) -> WorkflowSegment:
+def build_eis_after_cv_segment(
+    order: int,
+    config: EISFrontHalfConfig | None = None,
+) -> WorkflowSegment:
+    config = config or get_default_eis_front_half_config()
     return WorkflowSegment(
         segment_id="eis_after_cv",
         segment_type=WorkflowSegmentType.EIS_AFTER_CV,
         enabled=True,
         order=order,
         display_name="EIS-after cv",
+        params={
+            "high_frequency_hz": str(config.high_frequency_hz),
+            "low_frequency_hz": str(config.low_frequency_hz),
+        },
     )
 
 
@@ -187,13 +190,21 @@ def build_gcd_series_item_segment(
     )
 
 
-def build_eis_after_gcd_segment(order: int) -> WorkflowSegment:
+def build_eis_after_gcd_segment(
+    order: int,
+    config: EISFrontHalfConfig | None = None,
+) -> WorkflowSegment:
+    config = config or get_default_eis_front_half_config()
     return WorkflowSegment(
         segment_id="eis_after_gcd",
         segment_type=WorkflowSegmentType.EIS_AFTER_GCD,
         enabled=True,
         order=order,
         display_name="EIS-after GCD",
+        params={
+            "high_frequency_hz": str(config.high_frequency_hz),
+            "low_frequency_hz": str(config.low_frequency_hz),
+        },
     )
 
 
@@ -240,7 +251,11 @@ def build_cv_front_half_config_for_segment(segment: WorkflowSegment) -> CVFrontH
 
 
 def build_eis_front_half_config_for_segment(segment: WorkflowSegment) -> EISFrontHalfConfig:
-    if segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION:
+    if segment.segment_type in {
+        WorkflowSegmentType.EIS_AFTER_ACTIVATION,
+        WorkflowSegmentType.EIS_AFTER_CV,
+        WorkflowSegmentType.EIS_AFTER_GCD,
+    }:
         return EISFrontHalfConfig(
             high_frequency_hz=str(segment.params["high_frequency_hz"]),
             low_frequency_hz=str(segment.params["low_frequency_hz"]),
@@ -334,3 +349,4 @@ def _format_number(value: float | int) -> str:
 
 def _format_mv(scan_rate_vs: float) -> str:
     return _format_number(float(scan_rate_vs) * 1000.0)
+

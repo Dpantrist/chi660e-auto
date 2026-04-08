@@ -35,6 +35,7 @@ from app.gcd_config import (
     get_default_gcd_front_half_config,
 )
 from app.replay_manager import append_event, finalize_session
+from app.run_control import sleep_with_run_control
 from app.runtime_context import RuntimeContext
 from app.screenshot_manager import save_debug_capture, save_replay_capture
 from app.tasker_manager import bind_tasker, create_tasker
@@ -424,7 +425,7 @@ def _enforce_min_action_gap(context: RuntimeContext, action_name: str) -> None:
     remaining = MIN_ACTION_GAP_SEC - elapsed
     if remaining > 0:
         context.logger.info("Action gap enforced: action=%s sleep=%.3fs", action_name, remaining)
-        time.sleep(remaining)
+        _sleep_with_stop(context, remaining, f"action_gap:{action_name}")
         return
 
     context.logger.info("Action gap satisfied: action=%s", action_name)
@@ -432,6 +433,16 @@ def _enforce_min_action_gap(context: RuntimeContext, action_name: str) -> None:
 
 def _mark_action_completed(context: RuntimeContext) -> None:
     context.last_action_completed_at = time.monotonic()
+
+
+def _raise_if_stop_requested(context: RuntimeContext, stage: str) -> None:
+    if context.run_control is None:
+        return
+    context.run_control.raise_if_stop_requested(stage)
+
+
+def _sleep_with_stop(context: RuntimeContext, total_sec: float, stage: str) -> None:
+    sleep_with_run_control(context.run_control, total_sec, stage=stage)
 
 
 def _prepare_visual_task(
@@ -504,6 +515,7 @@ def _post_task(context: RuntimeContext, entry: str, pipeline_override: dict[str,
     if context.tasker is None:
         raise Chi660eAutoError("Tasker is not initialized.")
 
+    _raise_if_stop_requested(context, f"task:{entry}")
     _enforce_min_action_gap(context, f"task:{entry}")
     _ensure_context_window_ready_for_task(context)
     _prepare_visual_task(context, entry)
@@ -700,6 +712,7 @@ def _run_visual_action_once(
     relocate_cursor_before_task: bool = True,
 ) -> VisualActionResult:
     spec = get_visual_action_spec(spec_name)
+    _raise_if_stop_requested(context, f"visual:{spec.name}")
     _enforce_selected_state_spec(spec, intended_click=False)
     _ensure_context_window_ready_for_task(context)
     if spec.mode != VisualActionMode.DETECT_ONLY:
@@ -777,6 +790,7 @@ def _run_visual_action_click(
     spec_name: str,
 ) -> VisualActionResult:
     spec = get_visual_action_spec(spec_name)
+    _raise_if_stop_requested(context, f"visual_click:{spec.name}")
     _enforce_selected_state_spec(spec, intended_click=True)
     result = _run_visual_action_once(context, spec_name)
     if not result.success:
@@ -789,6 +803,7 @@ def _locate_visual_action_point(
     spec_name: str,
 ) -> VisualActionResult:
     spec = get_visual_action_spec(spec_name)
+    _raise_if_stop_requested(context, f"visual_locate:{spec.name}")
     _ensure_context_window_ready_for_task(context)
     _prepare_visual_task(context, spec.name)
 
@@ -937,6 +952,7 @@ def _wait_for_window(
     keyword: str | list[str],
     timeout_sec: float | None = None,
     interval_sec: float | None = None,
+    context: RuntimeContext | None = None,
 ):
     timeout = WINDOW_WAIT_TIMEOUT_SEC if timeout_sec is None else timeout_sec
     interval = WINDOW_WAIT_INTERVAL_SEC if interval_sec is None else interval_sec
@@ -944,27 +960,41 @@ def _wait_for_window(
     last_error: Exception | None = None
 
     while time.monotonic() < deadline:
+        if context is not None:
+            _raise_if_stop_requested(context, f"wait_window:{_canonical_window_keyword(keyword)}")
         windows = list_desktop_windows()
         try:
             return find_target_window(keyword, windows=windows)
         except WindowNotFoundError as exc:
             last_error = exc
-            time.sleep(interval)
+            if context is not None:
+                _sleep_with_stop(context, interval, f"wait_window:{_canonical_window_keyword(keyword)}")
+            else:
+                time.sleep(interval)
 
     raise WindowNotFoundError(
         f"Timed out waiting for window with keyword {keyword!r}."
     ) from last_error
 
 
-def _wait_for_window_close(keyword: str, timeout_sec: float = WINDOW_WAIT_TIMEOUT_SEC) -> None:
+def _wait_for_window_close(
+    keyword: str,
+    timeout_sec: float = WINDOW_WAIT_TIMEOUT_SEC,
+    context: RuntimeContext | None = None,
+) -> None:
     deadline = time.monotonic() + timeout_sec
     keyword_lower = keyword.lower()
 
     while time.monotonic() < deadline:
+        if context is not None:
+            _raise_if_stop_requested(context, f"wait_window_close:{keyword}")
         windows = list_desktop_windows()
         if not any(keyword_lower in window.title.lower() for window in windows):
             return
-        time.sleep(WINDOW_WAIT_INTERVAL_SEC)
+        if context is not None:
+            _sleep_with_stop(context, WINDOW_WAIT_INTERVAL_SEC, f"wait_window_close:{keyword}")
+        else:
+            time.sleep(WINDOW_WAIT_INTERVAL_SEC)
 
     raise Chi660eAutoError(f"Timed out waiting for window {keyword!r} to close.")
 
@@ -1135,14 +1165,14 @@ def _click_ocp_dialog_ok(context: RuntimeContext, ocp_window) -> None:
     USER32.SetForegroundWindow(ctypes.c_void_p(ocp_window.hwnd))
     USER32.SendMessageW(ctypes.c_void_p(button["hwnd"]), BM_CLICK, 0, 0)
     _mark_action_completed(context)
-    time.sleep(WINDOW_WAIT_INTERVAL_SEC)
+    _sleep_with_stop(context, WINDOW_WAIT_INTERVAL_SEC, "ocp_dialog_ok_settle")
 
     if any(OCP_WINDOW_KEYWORD.lower() in window.title.lower() for window in list_desktop_windows()):
         _enforce_min_action_gap(context, "ocp_dialog_ok_physical")
         _click_window_center_by_hwnd(button["hwnd"])
         _mark_action_completed(context)
 
-    _wait_for_window_close(OCP_WINDOW_KEYWORD)
+    _wait_for_window_close(OCP_WINDOW_KEYWORD, context=context)
     context.logger.info("OCP dialog OK clicked.")
 
 
@@ -1262,7 +1292,12 @@ def _bind_context_to_window(
                 },
             )
 
-    link_result = _wait_for_window(keyword, timeout_sec=timeout_sec, interval_sec=interval_sec)
+    link_result = _wait_for_window(
+        keyword,
+        timeout_sec=timeout_sec,
+        interval_sec=interval_sec,
+        context=context,
+    )
     context.logger.info("Binding runtime context to window: %s", link_result.selected_window.title)
     selected_window, controller = _connect_window_with_preset_verification(
         context,
@@ -1294,7 +1329,7 @@ def _bind_context_to_window(
 
 def _confirm_technique_selected_after_click(context: RuntimeContext) -> bool:
     context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
-    time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+    _sleep_with_stop(context, TECHNIQUE_STATE_SETTLE_SEC, "technique_cv_state_settle")
 
     for attempt in range(1, TECHNIQUE_STATE_RECHECK_ATTEMPTS + 1):
         selected_result = _run_visual_action_once(context, "Techniques_SelectCV_Selected_Check")
@@ -1321,7 +1356,7 @@ def _confirm_technique_selected_after_click(context: RuntimeContext) -> bool:
 
         if attempt < TECHNIQUE_STATE_RECHECK_ATTEMPTS:
             context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
-            time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+            _sleep_with_stop(context, TECHNIQUE_STATE_SETTLE_SEC, "technique_cv_state_recheck")
 
     return False
 
@@ -1386,7 +1421,7 @@ def _run_techniques_select_cv_and_confirm(context: RuntimeContext) -> None:
 
 def _confirm_technique_eis_selected_after_click(context: RuntimeContext) -> bool:
     context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
-    time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+    _sleep_with_stop(context, TECHNIQUE_STATE_SETTLE_SEC, "technique_eis_state_settle")
 
     for attempt in range(1, TECHNIQUE_STATE_RECHECK_ATTEMPTS + 1):
         selected_result = _run_visual_action_once(context, "Techniques_SelectEIS_Selected_Check")
@@ -1413,7 +1448,7 @@ def _confirm_technique_eis_selected_after_click(context: RuntimeContext) -> bool
 
         if attempt < TECHNIQUE_STATE_RECHECK_ATTEMPTS:
             context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
-            time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+            _sleep_with_stop(context, TECHNIQUE_STATE_SETTLE_SEC, "technique_eis_state_recheck")
 
     return False
 
@@ -1478,7 +1513,7 @@ def _run_techniques_select_eis_and_confirm(context: RuntimeContext) -> None:
 
 def _confirm_technique_gcd_selected_after_click(context: RuntimeContext) -> bool:
     context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
-    time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+    _sleep_with_stop(context, TECHNIQUE_STATE_SETTLE_SEC, "technique_gcd_state_settle")
 
     for attempt in range(1, TECHNIQUE_STATE_RECHECK_ATTEMPTS + 1):
         selected_result = _run_visual_action_once(context, "Techniques_SelectGCD_Selected_Check")
@@ -1505,7 +1540,7 @@ def _confirm_technique_gcd_selected_after_click(context: RuntimeContext) -> bool
 
         if attempt < TECHNIQUE_STATE_RECHECK_ATTEMPTS:
             context.logger.info("Technique state settle wait: seconds=%.1f", TECHNIQUE_STATE_SETTLE_SEC)
-            time.sleep(TECHNIQUE_STATE_SETTLE_SEC)
+            _sleep_with_stop(context, TECHNIQUE_STATE_SETTLE_SEC, "technique_gcd_state_recheck")
 
     return False
 
@@ -1591,6 +1626,7 @@ def _bind_next_window_or_open_from_main(
             next_window_keyword,
             timeout_sec=direct_wait_timeout,
             interval_sec=direct_wait_interval,
+            context=context,
         )
         context.logger.info(
             "Direct next window detected after technique confirm: keyword=%s",
@@ -1977,7 +2013,7 @@ def _run_cv_front_half_visual_form_once(
         get_visual_action_spec("CV_ClickOK"),
         ok_result,
     )
-    _wait_for_window_close(CV_PARAM_WINDOW_KEYWORD)
+    _wait_for_window_close(CV_PARAM_WINDOW_KEYWORD, context=context)
 
 
 def _run_cv_front_half_visual_form(
@@ -2021,7 +2057,7 @@ def _run_eis_front_half_visual_form_once(
         get_visual_action_spec("EIS_ClickOK"),
         ok_result,
     )
-    _wait_for_window_close(EIS_PARAM_WINDOW_KEYWORD)
+    _wait_for_window_close(EIS_PARAM_WINDOW_KEYWORD, context=context)
 
 
 def _run_eis_front_half_visual_form(
@@ -2103,7 +2139,7 @@ def _run_gcd_front_half_visual_form_once(
         get_visual_action_spec("GCD_ClickOK"),
         ok_result,
     )
-    _wait_for_window_close(GCD_PARAM_WINDOW_KEYWORD)
+    _wait_for_window_close(GCD_PARAM_WINDOW_KEYWORD, context=context)
 
 
 def _run_gcd_front_half_visual_form(
@@ -2180,6 +2216,7 @@ def run_cv_front_half_on_context(
     context: RuntimeContext,
     config: CVFrontHalfConfig,
 ) -> RuntimeContext:
+    _raise_if_stop_requested(context, "cv_front_half_start")
     # 前半圈主路径仍由流程层负责：窗口切换、步骤顺序、fallback 决策都只在这里。
     if context.replay_record is not None:
         append_event(
@@ -2193,6 +2230,7 @@ def run_cv_front_half_on_context(
             },
         )
 
+    _raise_if_stop_requested(context, "cv_front_half_before_technique")
     _run_visual_action_expect_window_with_fallback(
         context,
         "Main_ClickTechnique",
@@ -2200,6 +2238,7 @@ def run_cv_front_half_on_context(
         "Main_ClickTechnique",
     )
     _run_techniques_select_cv_and_confirm(context)
+    _raise_if_stop_requested(context, "cv_front_half_before_parameters")
     _bind_next_window_or_open_from_main(
         context,
         next_window_keyword=CV_PARAM_WINDOW_KEYWORD,
@@ -2212,6 +2251,7 @@ def run_cv_front_half_on_context(
     )
 
     _run_cv_front_half_visual_form(context, config)
+    _raise_if_stop_requested(context, "cv_front_half_after_parameters")
     _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "cv_front_half_main_final")
 
     if context.replay_record is not None:
@@ -2225,6 +2265,7 @@ def run_eis_front_half_on_context(
     context: RuntimeContext,
     config: EISFrontHalfConfig,
 ) -> RuntimeContext:
+    _raise_if_stop_requested(context, "eis_front_half_before_ocp")
     ocp_result = _read_and_close_open_circuit_potential(context)
     config.init_potential_v = ocp_result["normalized_value"]
 
@@ -2239,6 +2280,7 @@ def run_eis_front_half_on_context(
             },
         )
 
+    _raise_if_stop_requested(context, "eis_front_half_before_technique")
     _run_visual_action_expect_window_with_fallback(
         context,
         "Main_ClickTechnique",
@@ -2246,6 +2288,7 @@ def run_eis_front_half_on_context(
         "Main_ClickTechnique",
     )
     _run_techniques_select_eis_and_confirm(context)
+    _raise_if_stop_requested(context, "eis_front_half_before_parameters")
     _bind_next_window_or_open_from_main(
         context,
         next_window_keyword=EIS_PARAM_WINDOW_KEYWORD,
@@ -2259,6 +2302,7 @@ def run_eis_front_half_on_context(
     )
 
     _run_eis_front_half_visual_form(context, config)
+    _raise_if_stop_requested(context, "eis_front_half_after_parameters")
     _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "eis_front_half_main_final")
 
     if context.replay_record is not None:
@@ -2272,6 +2316,7 @@ def run_gcd_front_half_on_context(
     context: RuntimeContext,
     run_values: dict[str, str],
 ) -> RuntimeContext:
+    _raise_if_stop_requested(context, "gcd_front_half_start")
     if context.replay_record is not None:
         append_event(
             context.replay_record,
@@ -2286,6 +2331,7 @@ def run_gcd_front_half_on_context(
             },
         )
 
+    _raise_if_stop_requested(context, "gcd_front_half_before_technique")
     _run_visual_action_expect_window_with_fallback(
         context,
         "Main_ClickTechnique",
@@ -2293,6 +2339,7 @@ def run_gcd_front_half_on_context(
         "Main_ClickTechnique",
     )
     _run_techniques_select_gcd_and_confirm(context)
+    _raise_if_stop_requested(context, "gcd_front_half_before_parameters")
     _bind_next_window_or_open_from_main(
         context,
         next_window_keyword=GCD_PARAM_WINDOW_KEYWORD,
@@ -2306,6 +2353,7 @@ def run_gcd_front_half_on_context(
     )
 
     _run_gcd_front_half_visual_form(context, run_values)
+    _raise_if_stop_requested(context, "gcd_front_half_after_parameters")
     _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "gcd_front_half_main_final")
 
     if context.replay_record is not None:

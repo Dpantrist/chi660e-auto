@@ -1,11 +1,21 @@
 from __future__ import annotations
 
-"""最小 GUI 控制器。
+"""GUI 控制器。
 
-负责把 GUI 输入映射成任务段列表、执行计划预览与状态提示，不直接执行实验流程。
+只负责把 GUI state 映射成 workflow segments、执行计划预览与状态提示，
+不直接执行自动化动作。
 """
 
-from app.gui_models import WorkflowGuiState
+from app.eis_config import EISFrontHalfConfig
+from app.gui_models import (
+    CV_SCAN_RATE_OPTIONS_MV,
+    DEFAULT_SELECTED_PAGE,
+    GCD_CURRENT_DENSITY_OPTIONS_MA_CM2,
+    PAGE_GLOBAL_SETTINGS,
+    TASK_BUCKET_ORDER,
+    WorkflowGuiState,
+    build_default_gui_state as _build_default_gui_state,
+)
 from app.workflow_segments import (
     WorkflowSegment,
     build_activation_cv_segment,
@@ -20,19 +30,29 @@ from app.workflow_segments import (
     sort_enabled_segments,
 )
 
-SEGMENT_BUCKET_LABELS = {
-    "activation_cv": "活化 CV",
+TASK_BUCKET_LABELS = {
+    "activation_cv": "活化",
     "eis_after_activation": "EIS-after activation",
-    "cv_series": "CV 序列",
-    "rest": "静置",
+    "cv_series": "CV",
     "eis_after_cv": "EIS-after cv",
-    "gcd_series": "GCD 序列",
-    "eis_after_gcd": "EIS-after GCD",
+    "gcd_series": "GCD",
+    "eis_after_gcd": "EIS-after gcd",
+    PAGE_GLOBAL_SETTINGS: "全局设置",
+}
+
+TASK_SETTINGS_PAGES = {
+    "activation_cv": "活化",
+    "eis_after_activation": "EIS-after activation",
+    "cv_series": "CV",
+    "eis_after_cv": "EIS-after cv",
+    "gcd_series": "GCD",
+    "eis_after_gcd": "EIS-after gcd",
+    PAGE_GLOBAL_SETTINGS: "全局设置",
 }
 
 
 def build_default_gui_state() -> WorkflowGuiState:
-    return WorkflowGuiState()
+    return _build_default_gui_state()
 
 
 def parse_numeric_series(text: str) -> list[float]:
@@ -45,19 +65,39 @@ def parse_numeric_series(text: str) -> list[float]:
     return values
 
 
+def _parse_float(text: str, field_name: str) -> float:
+    stripped = str(text).strip()
+    if not stripped:
+        raise ValueError(f"{field_name} 不能为空。")
+    return float(stripped)
+
+
+def _parse_int(text: str, field_name: str) -> int:
+    stripped = str(text).strip()
+    if not stripped:
+        raise ValueError(f"{field_name} 不能为空。")
+    return int(float(stripped))
+
+
+def _minutes_to_seconds(text: str, field_name: str) -> int:
+    minutes = _parse_float(text, field_name)
+    return max(0, int(minutes * 60))
+
+
 def move_segment_bucket(state: WorkflowGuiState, bucket: str, direction: int) -> None:
+    """保留未来扩展用；当前 GUI 固定顺序，本轮不在界面中暴露。"""
     try:
-        index = state.segment_order.index(bucket)
+        index = state.task_order.index(bucket)
     except ValueError:
         return
 
-    new_index = max(0, min(len(state.segment_order) - 1, index + direction))
+    new_index = max(0, min(len(state.task_order) - 1, index + direction))
     if new_index == index:
         return
 
-    state.segment_order[index], state.segment_order[new_index] = (
-        state.segment_order[new_index],
-        state.segment_order[index],
+    state.task_order[index], state.task_order[new_index] = (
+        state.task_order[new_index],
+        state.task_order[index],
     )
 
 
@@ -65,73 +105,100 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
     segments: list[WorkflowSegment] = []
     order = 1
 
-    for bucket in state.segment_order:
-        if bucket == "activation_cv":
-            segment = build_activation_cv_segment(
-                order=order,
-                scan_rate_vs=state.activation_scan_rate_vs,
-                high_potential=state.activation_high_potential,
-                sweep_segments=state.activation_sweep_segments,
-                sensitivity=state.activation_sensitivity,
+    for bucket in state.task_order or list(TASK_BUCKET_ORDER):
+        if bucket == "activation_cv" and state.enable_activation_cv:
+            segments.append(
+                build_activation_cv_segment(
+                    order=order,
+                    scan_rate_vs=_parse_float(state.activation_scan_rate_vs, "活化 Scan Rate"),
+                    high_potential=state.activation_high_e_v.strip(),
+                    sweep_segments=state.activation_sweep_segments.strip(),
+                    sensitivity=state.activation_sensitivity.strip(),
+                )
             )
-            segment.enabled = state.enable_activation_cv
-            segments.append(segment)
             order += 1
             continue
 
-        if bucket == "eis_after_activation":
-            segment = build_eis_after_activation_segment(order=order)
-            segment.enabled = state.enable_eis_after_activation
-            segments.append(segment)
+        if bucket == "eis_after_activation" and state.enable_eis_after_activation:
+            segments.append(
+                build_eis_after_activation_segment(
+                    order=order,
+                    config=EISFrontHalfConfig(
+                        high_frequency_hz=state.eis_after_activation_high_frequency_hz.strip(),
+                        low_frequency_hz=state.eis_after_activation_low_frequency_hz.strip(),
+                    ),
+                )
+            )
             order += 1
             continue
 
-        if bucket == "cv_series":
+        if bucket == "cv_series" and state.enable_cv_series:
             for scan_rate_mv in state.cv_scan_rates_mv:
-                segment = build_cv_series_item_segment(
-                    order=order,
-                    scan_rate_mv=scan_rate_mv,
-                    high_potential=state.activation_high_potential,
-                    sweep_segments=state.activation_sweep_segments,
-                    sensitivity=state.activation_sensitivity,
+                segments.append(
+                    build_cv_series_item_segment(
+                        order=order,
+                        scan_rate_mv=scan_rate_mv,
+                        high_potential=state.cv_high_e_v.strip(),
+                        sweep_segments=state.cv_sweep_segments.strip(),
+                        sensitivity=state.cv_sensitivity.strip(),
+                    )
                 )
-                segment.enabled = state.enable_cv_series
-                segments.append(segment)
                 order += 1
             continue
 
-        if bucket == "rest":
-            segment = build_rest_segment(order=order, duration_sec=state.rest_duration_sec)
-            segment.enabled = state.enable_rest
-            segments.append(segment)
+        if bucket == "eis_after_cv" and state.enable_eis_after_cv:
+            rest_segment = build_rest_segment(
+                order=order,
+                duration_sec=_minutes_to_seconds(state.eis_after_cv_rest_minutes, "EIS-after cv 静置"),
+            )
+            rest_segment.display_name = f"静置 {state.eis_after_cv_rest_minutes.strip()}min"
+            segments.append(rest_segment)
             order += 1
-            continue
 
-        if bucket == "eis_after_cv":
             segment = build_eis_after_cv_segment(order=order)
-            segment.enabled = state.enable_eis_after_cv
+            segment.params.update(
+                {
+                    "high_frequency_hz": state.eis_after_cv_high_frequency_hz.strip(),
+                    "low_frequency_hz": state.eis_after_cv_low_frequency_hz.strip(),
+                }
+            )
             segments.append(segment)
             order += 1
             continue
 
-        if bucket == "gcd_series":
-            for current_density in state.gcd_current_densities_ma_cm2:
-                segment = build_gcd_series_item_segment(
-                    order=order,
-                    current_density_ma_cm2=current_density,
-                    electrode_area_cm2=state.electrode_area_cm2,
-                    high_e_limit_mv=state.gcd_high_e_limit_mv,
-                    data_storage_interval_sec=state.gcd_data_storage_interval_sec,
-                    number_of_segments=state.gcd_number_of_segments,
+        if bucket == "gcd_series" and state.enable_gcd_series:
+            electrode_area_cm2 = _parse_float(state.gcd_area_cm2, "GCD 面积")
+            high_e_limit_v = _parse_float(state.gcd_high_e_limit_v, "GCD High E limit")
+            for density in state.gcd_current_densities_ma_cm2:
+                segments.append(
+                    build_gcd_series_item_segment(
+                        order=order,
+                        current_density_ma_cm2=density,
+                        electrode_area_cm2=electrode_area_cm2,
+                        high_e_limit_mv=high_e_limit_v * 1000.0,
+                        data_storage_interval_sec=state.gcd_data_storage_interval_sec.strip(),
+                        number_of_segments=state.gcd_number_of_segments.strip(),
+                    )
                 )
-                segment.enabled = state.enable_gcd_series
-                segments.append(segment)
                 order += 1
             continue
 
-        if bucket == "eis_after_gcd":
+        if bucket == "eis_after_gcd" and state.enable_eis_after_gcd:
+            rest_segment = build_rest_segment(
+                order=order,
+                duration_sec=_minutes_to_seconds(state.eis_after_gcd_rest_minutes, "EIS-after gcd 静置"),
+            )
+            rest_segment.display_name = f"静置 {state.eis_after_gcd_rest_minutes.strip()}min"
+            segments.append(rest_segment)
+            order += 1
+
             segment = build_eis_after_gcd_segment(order=order)
-            segment.enabled = state.enable_eis_after_gcd
+            segment.params.update(
+                {
+                    "high_frequency_hz": state.eis_after_gcd_high_frequency_hz.strip(),
+                    "low_frequency_hz": state.eis_after_gcd_low_frequency_hz.strip(),
+                }
+            )
             segments.append(segment)
             order += 1
             continue
@@ -150,15 +217,15 @@ def build_execution_plan_preview_with_status(state: WorkflowGuiState) -> list[st
     preview: list[str] = []
     for index, segment in enumerate(sort_enabled_segments(build_segments_from_gui_state(state)), start=1):
         reason = segment_block_reason(segment)
-        suffix = f" [BLOCKED: {reason}]" if reason is not None else ""
+        suffix = f" [未接通: {reason}]" if reason is not None else ""
         preview.append(f"{index}. {segment.display_name}{suffix}")
     return preview
 
 
 def build_default_execution_plan_preview() -> list[str]:
-    state = build_default_gui_state()
-    return build_execution_plan_preview_with_status(state)
+    return build_execution_plan_preview_with_status(build_default_gui_state())
 
 
 def build_default_segment_plan_for_gui() -> list[WorkflowSegment]:
     return build_default_segment_plan()
+

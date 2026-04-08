@@ -13,6 +13,7 @@ from typing import Any
 from app.bootstrap import bootstrap_app
 from app.errors import Chi660eAutoError
 from app.post_run_flow import run_post_run_public_flow
+from app.run_control import RunControl, sleep_with_run_control
 from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
 from app.task_runner import (
@@ -46,6 +47,13 @@ def _append_workflow_event(
     append_event(context.replay_record, event_name, detail, level=level)
 
 
+def _raise_if_stop_requested(context: RuntimeContext, stage: str) -> None:
+    run_control = getattr(context, "run_control", None)
+    if run_control is None:
+        return
+    run_control.raise_if_stop_requested(stage)
+
+
 def _run_rest_segment(context: RuntimeContext, segment: WorkflowSegment) -> None:
     duration_sec = int(segment.params["duration_sec"])
     context.logger.info("Rest segment start: name=%s duration=%ss", segment.display_name, duration_sec)
@@ -54,7 +62,7 @@ def _run_rest_segment(context: RuntimeContext, segment: WorkflowSegment) -> None
         "workflow_segment_rest_start",
         {"segment_id": segment.segment_id, "display_name": segment.display_name, "duration_sec": duration_sec},
     )
-    time.sleep(max(0, duration_sec))
+    sleep_with_run_control(context.run_control, max(0, duration_sec), stage=f"rest:{segment.display_name}")
     _append_workflow_event(
         context,
         "workflow_segment_rest_completed",
@@ -103,6 +111,7 @@ def _raise_workflow_validation_error(issues: list[dict[str, Any]]) -> None:
 
 
 def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directory: str | Path) -> None:
+    _raise_if_stop_requested(context, f"segment_start:{segment.display_name}")
     if not segment_is_runnable(segment):
         raise Chi660eAutoError(
             f"Segment is modeled but not runnable yet: {segment.display_name} ({segment.segment_type.value})"
@@ -115,6 +124,7 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
             raise RuntimeError(f"Missing output filename for segment {segment.segment_id!r}.")
 
         run_cv_front_half_on_context(context, cv_config)
+        _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
         post_run_result = run_post_run_public_flow(
             context,
             save_directory=save_directory,
@@ -132,19 +142,24 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
         )
         return
 
-    if segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION:
+    if segment.segment_type in {
+        WorkflowSegmentType.EIS_AFTER_ACTIVATION,
+        WorkflowSegmentType.EIS_AFTER_CV,
+        WorkflowSegmentType.EIS_AFTER_GCD,
+    }:
         eis_config = build_eis_front_half_config_for_segment(segment)
         output_name = build_output_filename_for_segment(segment)
         if output_name is None:
             raise RuntimeError(f"Missing output filename for segment {segment.segment_id!r}.")
 
         run_eis_front_half_on_context(context, eis_config)
+        _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
         post_run_result = run_post_run_public_flow(
             context,
             save_directory=save_directory,
             file_name=output_name,
-            double_click_main_center_after_run=True,
-            double_click_main_center_delay_sec=10.0,
+            double_click_main_center_after_run=segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION,
+            double_click_main_center_delay_sec=10.0 if segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION else 0.0,
         )
         _append_workflow_event(
             context,
@@ -173,6 +188,7 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
         )
 
         run_gcd_front_half_on_context(context, gcd_run_values)
+        _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
         post_run_result = run_post_run_public_flow(
             context,
             save_directory=save_directory,
@@ -204,15 +220,18 @@ def run_workflow_segments(
     segments: list[WorkflowSegment],
     save_directory: str | Path,
     context: RuntimeContext | None = None,
+    run_control: RunControl | None = None,
 ) -> RuntimeContext:
     ordered_segments = sort_enabled_segments(segments)
     issues = validate_workflow_segments(ordered_segments)
     _raise_workflow_validation_error(issues)
 
     runtime_context = context or bootstrap_app()
+    runtime_context.run_control = run_control
 
     try:
         for index, segment in enumerate(ordered_segments, start=1):
+            _raise_if_stop_requested(runtime_context, f"workflow_before_segment:{segment.display_name}")
             output_name = build_output_filename_for_segment(segment)
             runtime_context.logger.info(
                 "Workflow segment start: index=%s/%s type=%s name=%s output=%s density=%s",
@@ -238,6 +257,7 @@ def run_workflow_segments(
             )
 
             _run_segment(runtime_context, segment, save_directory)
+            _raise_if_stop_requested(runtime_context, f"workflow_after_segment:{segment.display_name}")
 
             runtime_context.logger.info(
                 "Workflow segment completed: index=%s/%s type=%s name=%s",

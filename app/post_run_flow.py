@@ -10,6 +10,7 @@ from app.constants import MAIN_WINDOW_TITLE_CANDIDATES
 from app.controller_manager import capture_once, post_double_click
 from app.errors import Chi660eAutoError
 from app.replay_manager import append_event
+from app.run_control import sleep_with_run_control
 from app.runtime_context import RuntimeContext
 from app.save_dialog import save_as_txt
 from app.task_runner import (
@@ -37,6 +38,16 @@ def _append_post_run_event(
 
 def _bind_main_window(context: RuntimeContext, capture_name: str) -> RuntimeContext:
     return bind_runtime_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, capture_name)
+
+
+def _raise_if_stop_requested(context: RuntimeContext, stage: str) -> None:
+    if context.run_control is None:
+        return
+    context.run_control.raise_if_stop_requested(stage)
+
+
+def _sleep_with_stop(context: RuntimeContext, total_sec: float, stage: str) -> None:
+    sleep_with_run_control(context.run_control, total_sec, stage=stage)
 
 
 def _double_click_main_window_center(context: RuntimeContext) -> dict[str, Any]:
@@ -69,6 +80,7 @@ def _double_click_main_window_center(context: RuntimeContext) -> dict[str, Any]:
 
 
 def ensure_main_idle_before_run(context: RuntimeContext) -> dict[str, Any]:
+    _raise_if_stop_requested(context, "post_run_idle_before_bind")
     _bind_main_window(context, "post_run_main_idle")
 
     disabled_first = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
@@ -86,7 +98,7 @@ def ensure_main_idle_before_run(context: RuntimeContext) -> dict[str, Any]:
     if not disabled_first.matched:
         raise Chi660eAutoError("主窗口状态不明确，无法确认是否空闲。")
 
-    time.sleep(RUN_START_CONFIRM_INTERVAL_SEC)
+    _sleep_with_stop(context, RUN_START_CONFIRM_INTERVAL_SEC, "post_run_idle_stable_confirm")
     disabled_second = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
     usable_second = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
     context.logger.info(
@@ -110,6 +122,7 @@ def ensure_main_idle_before_run(context: RuntimeContext) -> dict[str, Any]:
 
 
 def start_run_and_confirm(context: RuntimeContext) -> dict[str, Any]:
+    _raise_if_stop_requested(context, "post_run_before_run")
     _bind_main_window(context, "post_run_main_before_run")
     run_result = run_visual_action_click_in_context(context, "Main_ClickRun")
     _append_post_run_event(
@@ -140,7 +153,7 @@ def start_run_and_confirm(context: RuntimeContext) -> dict[str, Any]:
             }
             _append_post_run_event(context, "run_started_confirmed", result)
             return result
-        time.sleep(RUN_START_CONFIRM_INTERVAL_SEC)
+        _sleep_with_stop(context, RUN_START_CONFIRM_INTERVAL_SEC, "post_run_run_start_confirm")
 
     raise Chi660eAutoError("点击 Run 后 5 秒内未确认任务已启动。")
 
@@ -153,10 +166,11 @@ def wait_until_run_finished(
     poll_count = 0
 
     while True:
+        _raise_if_stop_requested(context, "post_run_run_finish_poll")
         if max_wait_sec is not None and time.monotonic() - start_monotonic > max_wait_sec:
             raise Chi660eAutoError("运行等待超时。")
 
-        time.sleep(RUN_FINISH_POLL_SEC)
+        _sleep_with_stop(context, RUN_FINISH_POLL_SEC, "post_run_run_finish_poll_sleep")
         poll_count += 1
 
         try:
@@ -199,7 +213,7 @@ def wait_until_run_finished(
                 )
                 continue
 
-            time.sleep(RUN_FINISH_CONFIRM_SEC)
+            _sleep_with_stop(context, RUN_FINISH_CONFIRM_SEC, "post_run_run_finish_confirm")
             pause_disabled_confirm = run_visual_action_once_in_context(
                 context,
                 "Main_CheckPauseDisabled",
@@ -219,6 +233,8 @@ def wait_until_run_finished(
                 _append_post_run_event(context, "run_finished_confirmed", result)
                 return result
         except Exception as exc:
+            if context.run_control is not None and context.run_control.is_stop_requested():
+                raise
             context.logger.warning("Run finish poll rebind: error=%s", exc)
             _append_post_run_event(
                 context,
@@ -234,6 +250,7 @@ def save_result_via_save_as(
     save_directory: str | Path,
     file_name: str,
 ) -> dict[str, Any]:
+    _raise_if_stop_requested(context, "post_run_before_save")
     context.logger.info(
         "Save target requested: directory=%s filename=%s",
         save_directory,
@@ -313,7 +330,11 @@ def run_post_run_public_flow(
             "post_run_center_double_click_scheduled",
             {"delay_sec": float(double_click_main_center_delay_sec)},
         )
-        time.sleep(max(0.0, float(double_click_main_center_delay_sec)))
+        _sleep_with_stop(
+            context,
+            max(0.0, float(double_click_main_center_delay_sec)),
+            "post_run_center_double_click_delay",
+        )
         try:
             center_double_click_result = _double_click_main_window_center(context)
         except Exception as exc:
