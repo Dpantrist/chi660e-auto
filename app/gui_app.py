@@ -33,14 +33,14 @@ TASK_LABELS = {
 }
 
 
-WINDOW_GEOMETRY = "820x500"
-WINDOW_MINSIZE = (780, 470)
+WINDOW_GEOMETRY = "685x471"
+WINDOW_MINSIZE = (685, 471)
 NOTEBOOK_PADX = 2
 NOTEBOOK_PADY = 2
 TAB_PADDING = 3
 LEFT_PANEL_WIDTH = 205
 CENTER_PANEL_WIDTH = 250
-RIGHT_PANEL_WIDTH = 170
+RIGHT_PANEL_WIDTH = 200
 OUTER_PANEL_PADX = 2
 SECTION_PADDING = (4, 2)
 ROW_PADY_SMALL = 2
@@ -50,6 +50,7 @@ START_BUTTON_HEIGHT = 1
 BOTTOM_HINT_HEIGHT = 0
 PREVIEW_TREE_HEIGHT = 6
 RUNTIME_TEXT_HEIGHT = 6
+TIPS_TEXT = "测试前请依次打开工作站和CHI600E，运行过程中不要全屏或最小化CHI660E程序窗口"
 
 
 class _GuiQueueHandler(logging.Handler):
@@ -90,6 +91,7 @@ class Chi660eGuiApp:
         self._cv_rate_vars: dict[float, tk.BooleanVar] = {}
         self._gcd_density_vars: dict[float, tk.BooleanVar] = {}
         self._page_frames: dict[str, ttk.Frame] = {}
+        self._center_settings_frame: ttk.LabelFrame | None = None
 
         self._start_button_text = tk.StringVar(value="开始")
         self._page_title_text = tk.StringVar(value=TASK_LABELS.get(self.current_page, "CHI660E"))
@@ -186,7 +188,6 @@ class Chi660eGuiApp:
 
         tab = ttk.Frame(notebook, padding=TAB_PADDING)
         notebook.add(tab, text="CHI660E")
-
         tab.columnconfigure(0, weight=0, minsize=LEFT_PANEL_WIDTH)
         tab.columnconfigure(1, weight=1, minsize=CENTER_PANEL_WIDTH)
         tab.columnconfigure(2, weight=0, minsize=RIGHT_PANEL_WIDTH)
@@ -202,7 +203,8 @@ class Chi660eGuiApp:
         left.columnconfigure(0, weight=1)
         center.columnconfigure(0, weight=1)
         right.columnconfigure(0, weight=1)
-        left.rowconfigure(1, weight=1)
+        left.rowconfigure(0, weight=1)
+        left.rowconfigure(1, weight=0)
         center.rowconfigure(2, weight=0)
         right.rowconfigure(1, weight=1)
 
@@ -212,7 +214,8 @@ class Chi660eGuiApp:
 
     def _build_left_column(self, parent: ttk.Frame) -> None:
         task_frame = ttk.LabelFrame(parent, text="任务区", style="Section.TLabelframe")
-        task_frame.grid(row=0, column=0, sticky="ew")
+        task_frame.grid(row=0, column=0, sticky="nsew")
+        task_frame.columnconfigure(0, weight=1)
         task_frame.columnconfigure(1, weight=1)
 
         for row_index, bucket in enumerate(TASK_BUCKET_ORDER):
@@ -230,9 +233,15 @@ class Chi660eGuiApp:
                 width=5,
             ).grid(row=0, column=2, sticky="e")
 
+        inner_spacer_row = len(TASK_BUCKET_ORDER)
+        # 任务区内部留白，负责把“全选/清空”推到底边上方。
+        inner_spacer = ttk.Frame(task_frame)
+        inner_spacer.grid(row=inner_spacer_row, column=0, columnspan=3, sticky="nsew")
+        task_frame.rowconfigure(inner_spacer_row, weight=1)
+
         action_row = ttk.Frame(task_frame)
         action_row.grid(
-            row=len(TASK_BUCKET_ORDER),
+            row=inner_spacer_row + 1,
             column=0,
             columnspan=3,
             sticky="ew",
@@ -250,7 +259,7 @@ class Chi660eGuiApp:
         spacer.grid(row=1, column=0, sticky="nsew")
 
         global_frame = ttk.LabelFrame(parent, text="全局设置", style="Section.TLabelframe")
-        global_frame.grid(row=2, column=0, sticky="ew", pady=(2, 1))
+        global_frame.grid(row=2, column=0, sticky="ew", pady=(4, 2))
         global_frame.columnconfigure(0, weight=1)
         ttk.Button(
             global_frame,
@@ -276,15 +285,14 @@ class Chi660eGuiApp:
         self._start_button.grid(row=3, column=0, sticky="ew", pady=(1, 0))
 
     def _build_center_column(self, parent: ttk.Frame) -> None:
-        header = ttk.Frame(parent)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 1))
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, textvariable=self._page_title_text, font=("Microsoft YaHei UI", 12, "bold")).grid(
-            row=0, column=0, sticky="w"
+        # 中间设置区标题直接挂到外框边线上，保证与左右分组框顶部对齐。
+        self._center_settings_frame = ttk.LabelFrame(
+            parent,
+            text=TASK_LABELS.get(self.current_page, "CHI660E"),
+            style="Section.TLabelframe",
         )
-
-        content = ttk.LabelFrame(parent, text="", style="Section.TLabelframe")
-        content.grid(row=1, column=0, sticky="ew")
+        content = self._center_settings_frame
+        content.grid(row=0, column=0, sticky="ew")
         content.columnconfigure(0, weight=1)
         content.rowconfigure(0, weight=1)
 
@@ -319,32 +327,43 @@ class Chi660eGuiApp:
             frame.grid(row=0, column=0, sticky="nsew")
 
         spacer = ttk.Frame(parent, height=0)
-        spacer.grid(row=2, column=0, sticky="ew")
+        spacer.grid(row=1, column=0, sticky="nsew")
         spacer.grid_propagate(False)
+        parent.rowconfigure(1, weight=1)
+        parent.rowconfigure(2, weight=0)
+        parent.rowconfigure(3, weight=0)
 
-        hint = ttk.Frame(parent, height=BOTTOM_HINT_HEIGHT)
-        hint.grid(row=3, column=0, sticky="ew", pady=(0, 0))
-        hint.grid_propagate(False)
+        tips_frame = ttk.LabelFrame(parent, text="Tips", style="Section.TLabelframe")
+        tips_frame.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(2, 0))
+        tips_frame.columnconfigure(0, weight=1)
+        ttk.Label(
+            tips_frame,
+            text=TIPS_TEXT,
+            justify="left",
+            wraplength=230,
+        ).grid(row=0, column=0, sticky="w")
 
     def _build_right_column(self, parent: ttk.Frame) -> None:
         preview_frame = ttk.LabelFrame(parent, text="执行计划预览", style="Section.TLabelframe")
         preview_frame.grid(row=0, column=0, sticky="ew", pady=(0, OUTER_PANEL_PADX))
         preview_frame.columnconfigure(0, weight=1)
+        preview_frame.columnconfigure(1, weight=0)
         preview_frame.rowconfigure(0, weight=1)
 
         self._preview_tree = ttk.Treeview(
             preview_frame,
             style="Compact.Treeview",
             columns=("index", "name", "status"),
+            displaycolumns=("index", "name", "status"),
             show="headings",
             height=PREVIEW_TREE_HEIGHT,
         )
         self._preview_tree.heading("index", text="#")
         self._preview_tree.heading("name", text="任务")
         self._preview_tree.heading("status", text="状态")
-        self._preview_tree.column("index", width=24, anchor="center", stretch=False)
-        self._preview_tree.column("name", width=25, anchor="w")
-        self._preview_tree.column("status", width=30, anchor="w", stretch=False)
+        self._preview_tree.column("index", width=24, minwidth=24, anchor="center", stretch=False)
+        self._preview_tree.column("name", width=104, minwidth=104, anchor="w", stretch=False)
+        self._preview_tree.column("status", width=42, minwidth=42, anchor="w", stretch=False)
         preview_scroll = ttk.Scrollbar(preview_frame, orient="vertical", command=self._preview_tree.yview)
         self._preview_tree.configure(yscrollcommand=preview_scroll.set)
         self._preview_tree.grid(row=0, column=0, sticky="nsew")
@@ -353,10 +372,12 @@ class Chi660eGuiApp:
         runtime_frame = ttk.LabelFrame(parent, text="当前进程记录", style="Section.TLabelframe")
         runtime_frame.grid(row=1, column=0, sticky="nsew")
         runtime_frame.columnconfigure(0, weight=1)
+        runtime_frame.columnconfigure(1, weight=0)
         runtime_frame.rowconfigure(0, weight=1)
 
         self._runtime_text = tk.Text(
             runtime_frame,
+            width=22,
             height=RUNTIME_TEXT_HEIGHT,
             wrap="word",
             bg="#f6f8fb",
@@ -380,7 +401,6 @@ class Chi660eGuiApp:
         self._add_entry_row(frame, 0, "High E (V)", "activation_high_e_v")
         self._add_entry_row(frame, 1, "Scan Rate (V/s)", "activation_scan_rate_vs")
         self._add_entry_row(frame, 2, "Sweep Segments", "activation_sweep_segments")
-        self._add_entry_row(frame, 3, "Sensitivity (A/V)", "activation_sensitivity")
         return frame
 
     def _build_eis_page(self, parent: ttk.Frame, high_field: str, low_field: str) -> ttk.Frame:
@@ -407,7 +427,6 @@ class Chi660eGuiApp:
             variables=self._cv_rate_vars,
         )
         self._add_entry_row(frame, 2, "Sweep Segments", "cv_sweep_segments")
-        self._add_entry_row(frame, 3, "Sensitivity (A/V)", "cv_sensitivity")
         return frame
 
     def _build_gcd_page(self, parent: ttk.Frame) -> ttk.Frame:
@@ -487,7 +506,10 @@ class Chi660eGuiApp:
             page_key = PAGE_GLOBAL_SETTINGS
         self.current_page = page_key
         self.state.selected_page = page_key
-        self._page_title_text.set(TASK_LABELS.get(page_key, "CHI660E"))
+        page_title = TASK_LABELS.get(page_key, "CHI660E")
+        self._page_title_text.set(page_title)
+        if self._center_settings_frame is not None:
+            self._center_settings_frame.configure(text=page_title)
         self._page_frames[page_key].tkraise()
         if not self._initializing:
             save_gui_state(self.state)
