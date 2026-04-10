@@ -1,0 +1,1297 @@
+<?xml version='1.0' encoding='utf-8'?>
+<interface version="1.3">
+  <object class="tk.Toplevel" id="toplevel1">
+    <property name="geometry">690x471</property>
+    <property name="title" translatable="yes">CHI660E 自动化 - ver 1.0</property>
+    <property name="background">#eef1f5</property>
+    <containerlayout manager="grid">
+      <property type="col" id="0" name="weight">1</property>
+      <property type="row" id="0" name="weight">1</property>
+    </containerlayout>
+
+    <child>
+      <object class="ttk.Frame" id="mainframe">
+        <property name="padding">3</property>
+        <layout manager="grid">
+          <property name="column">0</property>
+          <property name="row">0</property>
+          <property name="sticky">nsew</property>
+        </layout>
+        <containerlayout manager="grid">
+          <property type="col" id="0" name="weight">1</property>
+          <property type="col" id="1" name="minsize">200</property>
+          <property type="row" id="0" name="weight">1</property>
+        </containerlayout>
+
+        <!-- 左中宿主 -->
+        <child>
+          <object class="ttk.Frame" id="lc_host">
+            <layout manager="grid">
+              <property name="column">0</property>
+              <property name="row">0</property>
+              <property name="sticky">nsew</property>
+              <property name="padx">0 2</property>
+            </layout>
+            <containerlayout manager="grid">
+              <property type="col" id="0" name="minsize">205</property>
+              <property type="col" id="1" name="weight">1</property>
+              <property type="col" id="1" name="minsize">250</property>
+              <property type="row" id="0" name="weight">1</property>
+              <property type="row" id="1" name="weight">0</property>
+            </containerlayout>
+
+            <!-- 左上 -->
+            <child>
+              <object class="ttk.Frame" id="left_top">
+                <layout manager="grid">
+                  <property name="column">0</property>
+                  <property name="row">0</property>
+                  <property name="sticky">nsew</property>
+                  <property name="padx">0 2</property>
+                </layout>
+                <containerlayout manager="grid">
+                  <property type="col" id="0" name="weight">1</property>
+                  <property type="row" id="0" name="weight">1</property>
+                </containerlayout>
+
+                <child>
+                  <object class="ttk.Labelframe" id="task_frame">
+                    <property name="text" translatable="yes">任务区</property>
+                    <property name="padding">4 2</property>
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">0</property>
+                      <property name="sticky">nsew</property>
+                    </layout>
+                    <containerlayout manager="grid">
+                      <property type="col" id="0" name="weight">1</property>
+                      <property type="col" id="1" name="weight">0</property>
+                      <property type="col" id="2" name="weight">0</property>
+                      <property type="row" id="6" name="weight">1</property>
+                    </containerlayout>
+
+                    <child>
+                      <object class="ttk.Frame" id="row_activation_cv">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">0</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">ew</property>
+                          <property name="pady">8</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="1" name="weight">1</property>
+                        </containerlayout>
+                        <child>
+                          <object class="ttk.Checkbutton" id="chk_activation_cv">
+                            <property name="variable">boolean:enable_activation_cv</property>
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="padx">0 4</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Label" id="lbl_activation_cv">
+                            <property name="text" translatable="yes">活化</property>
+                            <layout manager="grid">
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                              <property name="sticky">w</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Button" id="btn_activation_cv">
+                            <property name="text" translatable="yes">设置</property>
+                            <property name="width">5</property>
+                            <property cbtype="simple" name="command" type="command">on_show_activation_cv</property>
+                            <layout manager="grid">
+                              <property name="column">2</property>
+                              <property name="row">0</property>
+                              <property name="sticky">e</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="row_eis_after_activation">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">1</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">ew</property>
+                          <property name="pady">8</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="1" name="weight">1</property>
+                        </containerlayout>
+                        <child>
+                          <object class="ttk.Checkbutton" id="chk_eis_after_activation">
+                            <property name="variable">boolean:enable_eis_after_activation</property>
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="padx">0 4</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Label" id="lbl_eis_after_activation">
+                            <property name="text" translatable="yes">EIS-after activation</property>
+                            <layout manager="grid">
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                              <property name="sticky">w</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Button" id="btn_eis_after_activation">
+                            <property name="text" translatable="yes">设置</property>
+                            <property name="width">5</property>
+                            <property cbtype="simple" name="command" type="command">on_show_eis_after_activation</property>
+                            <layout manager="grid">
+                              <property name="column">2</property>
+                              <property name="row">0</property>
+                              <property name="sticky">e</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="row_cv_series">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">2</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">ew</property>
+                          <property name="pady">8</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="1" name="weight">1</property>
+                        </containerlayout>
+                        <child>
+                          <object class="ttk.Checkbutton" id="chk_cv_series">
+                            <property name="variable">boolean:enable_cv_series</property>
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="padx">0 4</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Label" id="lbl_cv_series">
+                            <property name="text" translatable="yes">CV</property>
+                            <layout manager="grid">
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                              <property name="sticky">w</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Button" id="btn_cv_series">
+                            <property name="text" translatable="yes">设置</property>
+                            <property name="width">5</property>
+                            <property cbtype="simple" name="command" type="command">on_show_cv_series</property>
+                            <layout manager="grid">
+                              <property name="column">2</property>
+                              <property name="row">0</property>
+                              <property name="sticky">e</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="row_eis_after_cv">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">3</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">ew</property>
+                          <property name="pady">8</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="1" name="weight">1</property>
+                        </containerlayout>
+                        <child>
+                          <object class="ttk.Checkbutton" id="chk_eis_after_cv">
+                            <property name="variable">boolean:enable_eis_after_cv</property>
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="padx">0 4</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Label" id="lbl_eis_after_cv">
+                            <property name="text" translatable="yes">EIS-after cv</property>
+                            <layout manager="grid">
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                              <property name="sticky">w</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Button" id="btn_eis_after_cv">
+                            <property name="text" translatable="yes">设置</property>
+                            <property name="width">5</property>
+                            <property cbtype="simple" name="command" type="command">on_show_eis_after_cv</property>
+                            <layout manager="grid">
+                              <property name="column">2</property>
+                              <property name="row">0</property>
+                              <property name="sticky">e</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="row_gcd_series">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">4</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">ew</property>
+                          <property name="pady">8</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="1" name="weight">1</property>
+                        </containerlayout>
+                        <child>
+                          <object class="ttk.Checkbutton" id="chk_gcd_series">
+                            <property name="variable">boolean:enable_gcd_series</property>
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="padx">0 4</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Label" id="lbl_gcd_series">
+                            <property name="text" translatable="yes">GCD</property>
+                            <layout manager="grid">
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                              <property name="sticky">w</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Button" id="btn_gcd_series">
+                            <property name="text" translatable="yes">设置</property>
+                            <property name="width">5</property>
+                            <property cbtype="simple" name="command" type="command">on_show_gcd_series</property>
+                            <layout manager="grid">
+                              <property name="column">2</property>
+                              <property name="row">0</property>
+                              <property name="sticky">e</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="row_eis_after_gcd">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">5</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">ew</property>
+                          <property name="pady">8</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="1" name="weight">1</property>
+                        </containerlayout>
+                        <child>
+                          <object class="ttk.Checkbutton" id="chk_eis_after_gcd">
+                            <property name="variable">boolean:enable_eis_after_gcd</property>
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="padx">0 4</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Label" id="lbl_eis_after_gcd">
+                            <property name="text" translatable="yes">EIS-after gcd</property>
+                            <layout manager="grid">
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                              <property name="sticky">w</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Button" id="btn_eis_after_gcd">
+                            <property name="text" translatable="yes">设置</property>
+                            <property name="width">5</property>
+                            <property cbtype="simple" name="command" type="command">on_show_eis_after_gcd</property>
+                            <layout manager="grid">
+                              <property name="column">2</property>
+                              <property name="row">0</property>
+                              <property name="sticky">e</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="task_inner_spacer">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">6</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">nsew</property>
+                        </layout>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="task_action_row">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">7</property>
+                          <property name="columnspan">3</property>
+                          <property name="sticky">ew</property>
+                          <property name="pady">4 2</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="0" name="weight">1</property>
+                          <property type="col" id="1" name="weight">1</property>
+                        </containerlayout>
+                        <child>
+                          <object class="ttk.Button" id="btn_select_all">
+                            <property name="text" translatable="yes">全选</property>
+                            <property cbtype="simple" name="command" type="command">on_select_all_tasks</property>
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">ew</property>
+                              <property name="padx">0 4</property>
+                            </layout>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="ttk.Button" id="btn_clear_all">
+                            <property name="text" translatable="yes">清空</property>
+                            <property cbtype="simple" name="command" type="command">on_clear_all_tasks</property>
+                            <layout manager="grid">
+                              <property name="column">1</property>
+                              <property name="row">0</property>
+                              <property name="sticky">ew</property>
+                              <property name="padx">4 0</property>
+                            </layout>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <!-- 中上 -->
+            <child>
+              <object class="ttk.Frame" id="center_top">
+                <layout manager="grid">
+                  <property name="column">1</property>
+                  <property name="row">0</property>
+                  <property name="sticky">nsew</property>
+                </layout>
+                <containerlayout manager="grid">
+                  <property type="col" id="0" name="weight">1</property>
+                  <property type="row" id="0" name="weight">1</property>
+                </containerlayout>
+
+                <child>
+                  <object class="ttk.Labelframe" id="settings_frame">
+                    <property name="text" translatable="yes">设置区</property>
+                    <property name="padding">4 2</property>
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">0</property>
+                      <property name="sticky">nsew</property>
+                    </layout>
+                    <containerlayout manager="grid">
+                      <property type="col" id="0" name="weight">1</property>
+                      <property type="row" id="0" name="weight">0</property>
+                      <property type="row" id="1" name="weight">1</property>
+                    </containerlayout>
+
+                    <child>
+                      <object class="ttk.Frame" id="pages_container">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">0</property>
+                          <property name="sticky">nsew</property>
+                        </layout>
+                        <containerlayout manager="grid">
+                          <property type="col" id="0" name="weight">1</property>
+                          <property type="row" id="0" name="weight">1</property>
+                        </containerlayout>
+
+                        <!-- activation page -->
+                        <child>
+                          <object class="ttk.Frame" id="page_activation_cv">
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">nsew</property>
+                            </layout>
+                            <containerlayout manager="grid">
+                              <property type="col" id="0" name="minsize">112</property>
+                            </containerlayout>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_activation_high_e_v">
+                                <property name="text" translatable="yes">High E (V)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_activation_high_e_v">
+                                <property name="textvariable">string:activation_high_e_v</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 2</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_activation_scan_rate_vs">
+                                <property name="text" translatable="yes">Scan Rate (V/s)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_activation_scan_rate_vs">
+                                <property name="textvariable">string:activation_scan_rate_vs</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 2</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_activation_sweep_segments">
+                                <property name="text" translatable="yes">Sweep Segments</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_activation_sweep_segments">
+                                <property name="textvariable">string:activation_sweep_segments</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 2</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- eis after activation -->
+                        <child>
+                          <object class="ttk.Frame" id="page_eis_after_activation">
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">nsew</property>
+                            </layout>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_activation_high_frequency_hz">
+                                <property name="text" translatable="yes">High Frequency (Hz)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_activation_high_frequency_hz">
+                                <property name="textvariable">string:eis_after_activation_high_frequency_hz</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_activation_low_frequency_hz">
+                                <property name="text" translatable="yes">Low Frequency (Hz)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_activation_low_frequency_hz">
+                                <property name="textvariable">string:eis_after_activation_low_frequency_hz</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- cv page -->
+                        <child>
+                          <object class="ttk.Frame" id="page_cv_series">
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">nsew</property>
+                            </layout>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_cv_high_e_v">
+                                <property name="text" translatable="yes">High E (V)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_cv_high_e_v">
+                                <property name="textvariable">string:cv_high_e_v</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_cv_scan_group">
+                                <property name="text" translatable="yes">Scan Rate (mV/s)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">nw</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Frame" id="cv_rate_group">
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                                <containerlayout manager="grid">
+                                  <property type="col" id="0" name="weight">1</property>
+                                  <property type="col" id="1" name="weight">1</property>
+                                </containerlayout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_cv_sweep_segments">
+                                <property name="text" translatable="yes">Sweep Segments</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_cv_sweep_segments">
+                                <property name="textvariable">string:cv_sweep_segments</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- eis after cv -->
+                        <child>
+                          <object class="ttk.Frame" id="page_eis_after_cv">
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">nsew</property>
+                            </layout>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_cv_rest_minutes">
+                                <property name="text" translatable="yes">静置（分钟）</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_cv_rest_minutes">
+                                <property name="textvariable">string:eis_after_cv_rest_minutes</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_cv_high_frequency_hz">
+                                <property name="text" translatable="yes">High Frequency (Hz)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_cv_high_frequency_hz">
+                                <property name="textvariable">string:eis_after_cv_high_frequency_hz</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_cv_low_frequency_hz">
+                                <property name="text" translatable="yes">Low Frequency (Hz)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_cv_low_frequency_hz">
+                                <property name="textvariable">string:eis_after_cv_low_frequency_hz</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- gcd page -->
+                        <child>
+                          <object class="ttk.Frame" id="page_gcd_series">
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">nsew</property>
+                            </layout>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_gcd_area_cm2">
+                                <property name="text" translatable="yes">面积（cm2）</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_gcd_area_cm2">
+                                <property name="textvariable">string:gcd_area_cm2</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_gcd_density_group">
+                                <property name="text" translatable="yes">电流密度（mA/cm2）</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">nw</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Frame" id="gcd_density_group">
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                                <containerlayout manager="grid">
+                                  <property type="col" id="0" name="weight">1</property>
+                                  <property type="col" id="1" name="weight">1</property>
+                                </containerlayout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_gcd_high_e_limit_v">
+                                <property name="text" translatable="yes">High E limit (V)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_gcd_high_e_limit_v">
+                                <property name="textvariable">string:gcd_high_e_limit_v</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_gcd_data_storage_interval_sec">
+                                <property name="text" translatable="yes">Data Storage Intvl (sec)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">3</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_gcd_data_storage_interval_sec">
+                                <property name="textvariable">string:gcd_data_storage_interval_sec</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">3</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_gcd_number_of_segments">
+                                <property name="text" translatable="yes">Number of Segments</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">4</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_gcd_number_of_segments">
+                                <property name="textvariable">string:gcd_number_of_segments</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">4</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- eis after gcd -->
+                        <child>
+                          <object class="ttk.Frame" id="page_eis_after_gcd">
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">nsew</property>
+                            </layout>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_gcd_rest_minutes">
+                                <property name="text" translatable="yes">静置（分钟）</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_gcd_rest_minutes">
+                                <property name="textvariable">string:eis_after_gcd_rest_minutes</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_gcd_high_frequency_hz">
+                                <property name="text" translatable="yes">High Frequency (Hz)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_gcd_high_frequency_hz">
+                                <property name="textvariable">string:eis_after_gcd_high_frequency_hz</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">1</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_eis_after_gcd_low_frequency_hz">
+                                <property name="text" translatable="yes">Low Frequency (Hz)</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_eis_after_gcd_low_frequency_hz">
+                                <property name="textvariable">string:eis_after_gcd_low_frequency_hz</property>
+                                <property name="width">11</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">2</property>
+                                  <property name="sticky">w</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- global page -->
+                        <child>
+                          <object class="ttk.Frame" id="page_global_settings">
+                            <layout manager="grid">
+                              <property name="column">0</property>
+                              <property name="row">0</property>
+                              <property name="sticky">nsew</property>
+                            </layout>
+                            <containerlayout manager="grid">
+                              <property type="col" id="1" name="weight">1</property>
+                            </containerlayout>
+
+                            <child>
+                              <object class="ttk.Label" id="lbl_save_directory">
+                                <property name="text" translatable="yes">存储路径</property>
+                                <layout manager="grid">
+                                  <property name="column">0</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">w</property>
+                                  <property name="padx">0 8</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Entry" id="entry_save_directory">
+                                <property name="textvariable">string:save_directory</property>
+                                <layout manager="grid">
+                                  <property name="column">1</property>
+                                  <property name="row">0</property>
+                                  <property name="sticky">ew</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="ttk.Button" id="btn_browse_save_directory">
+                                <property name="text" translatable="yes">浏览</property>
+                                <property cbtype="simple" name="command" type="command">on_browse_save_directory</property>
+                                <layout manager="grid">
+                                  <property name="column">2</property>
+                                  <property name="row">0</property>
+                                  <property name="padx">8 0</property>
+                                  <property name="pady">2</property>
+                                </layout>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="ttk.Frame" id="settings_inner_spacer">
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">1</property>
+                          <property name="sticky">nsew</property>
+                        </layout>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <!-- 左下 -->
+            <child>
+              <object class="ttk.Frame" id="left_bottom_frame">
+                <layout manager="grid">
+                  <property name="column">0</property>
+                  <property name="row">1</property>
+                  <property name="sticky">nsew</property>
+                  <property name="padx">0 2</property>
+                  <property name="pady">2 0</property>
+                </layout>
+                <containerlayout manager="grid">
+                  <property type="col" id="0" name="weight">1</property>
+                  <property type="row" id="0" name="weight">0</property>
+                  <property type="row" id="1" name="weight">0</property>
+                </containerlayout>
+
+                <child>
+                  <object class="ttk.Labelframe" id="global_frame">
+                    <property name="text" translatable="yes">全局设置</property>
+                    <property name="padding">4 2</property>
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">0</property>
+                      <property name="sticky">ew</property>
+                      <property name="pady">0 2</property>
+                    </layout>
+                    <containerlayout manager="grid">
+                      <property type="col" id="0" name="weight">1</property>
+                    </containerlayout>
+                    <child>
+                      <object class="ttk.Button" id="btn_show_global_settings">
+                        <property name="text" translatable="yes">打开设置页</property>
+                        <property cbtype="simple" name="command" type="command">on_show_global_settings</property>
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">0</property>
+                          <property name="sticky">ew</property>
+                        </layout>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="tk.Button" id="start_button">
+                    <property name="textvariable">string:start_button_text</property>
+                    <property cbtype="simple" name="command" type="command">on_start_pause_clicked</property>
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">1</property>
+                      <property name="sticky">ew</property>
+                      <property name="pady">1 0</property>
+                    </layout>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <!-- 中下 -->
+            <child>
+              <object class="ttk.Frame" id="center_bottom_frame">
+                <layout manager="grid">
+                  <property name="column">1</property>
+                  <property name="row">1</property>
+                  <property name="sticky">nsew</property>
+                  <property name="pady">2 0</property>
+                </layout>
+                <containerlayout manager="grid">
+                  <property type="col" id="0" name="weight">1</property>
+                  <property type="row" id="0" name="weight">1</property>
+                </containerlayout>
+
+                <child>
+                  <object class="ttk.Labelframe" id="tips_frame">
+                    <property name="text" translatable="yes">Tips</property>
+                    <property name="padding">4 2</property>
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">0</property>
+                      <property name="sticky">nsew</property>
+                    </layout>
+                    <containerlayout manager="grid">
+                      <property type="col" id="0" name="weight">1</property>
+                    </containerlayout>
+
+                    <child>
+                      <object class="ttk.Label" id="lbl_tips">
+                        <property name="text" translatable="yes">测试前请依次打开工作站和CHI600E
+
+运行中不要全屏或最小化CHI660E程序窗口</property>
+                        <property name="justify">left</property>
+                        <property name="wraplength">230</property>
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">0</property>
+                          <property name="sticky">w</property>
+                        </layout>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- 右列 -->
+        <child>
+          <object class="ttk.Frame" id="right_panel">
+            <layout manager="grid">
+              <property name="column">1</property>
+              <property name="row">0</property>
+              <property name="sticky">nsew</property>
+            </layout>
+            <containerlayout manager="grid">
+              <property type="col" id="0" name="weight">1</property>
+              <property type="row" id="1" name="weight">1</property>
+            </containerlayout>
+
+            <child>
+              <object class="ttk.Labelframe" id="preview_frame">
+                <property name="text" translatable="yes">执行计划预览</property>
+                <property name="padding">4 2</property>
+                <layout manager="grid">
+                  <property name="column">0</property>
+                  <property name="row">0</property>
+                  <property name="sticky">ew</property>
+                  <property name="pady">0 2</property>
+                </layout>
+                <containerlayout manager="grid">
+                  <property type="col" id="0" name="weight">1</property>
+                  <property type="col" id="1" name="weight">0</property>
+                  <property type="row" id="0" name="weight">1</property>
+                </containerlayout>
+
+                <child>
+                  <object class="ttk.Treeview" id="preview_tree">
+                    <property name="columns">index name status</property>
+                    <property name="displaycolumns">index name status</property>
+                    <property name="show">headings</property>
+                    <property name="height">6</property>
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">0</property>
+                      <property name="sticky">nsew</property>
+                    </layout>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="ttk.Scrollbar" id="preview_scrollbar">
+                    <property name="orient">vertical</property>
+                    <layout manager="grid">
+                      <property name="column">1</property>
+                      <property name="row">0</property>
+                      <property name="sticky">ns</property>
+                    </layout>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <child>
+              <object class="ttk.Labelframe" id="runtime_frame">
+                <property name="text" translatable="yes">当前进程记录</property>
+                <property name="padding">4 2</property>
+                <layout manager="grid">
+                  <property name="column">0</property>
+                  <property name="row">1</property>
+                  <property name="sticky">nsew</property>
+                </layout>
+                <containerlayout manager="grid">
+                  <property type="col" id="0" name="weight">1</property>
+                  <property type="col" id="1" name="weight">0</property>
+                  <property type="row" id="0" name="weight">1</property>
+                </containerlayout>
+
+                <child>
+                  <object class="tk.Text" id="runtime_text">
+                    <property name="width">22</property>
+                    <property name="height">6</property>
+                    <property name="wrap">word</property>
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">0</property>
+                      <property name="sticky">nsew</property>
+                    </layout>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="ttk.Scrollbar" id="runtime_scrollbar">
+                    <property name="orient">vertical</property>
+                    <layout manager="grid">
+                      <property name="column">1</property>
+                      <property name="row">0</property>
+                      <property name="sticky">ns</property>
+                    </layout>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="ttk.Frame" id="status_row">
+                    <layout manager="grid">
+                      <property name="column">0</property>
+                      <property name="row">1</property>
+                      <property name="columnspan">2</property>
+                      <property name="sticky">ew</property>
+                      <property name="pady">1 0</property>
+                    </layout>
+                    <child>
+                      <object class="ttk.Label" id="status_label">
+                        <property name="textvariable">string:status_text</property>
+                        <layout manager="grid">
+                          <property name="column">0</property>
+                          <property name="row">0</property>
+                          <property name="sticky">w</property>
+                        </layout>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+      </object>
+    </child>
+  </object>
+</interface>

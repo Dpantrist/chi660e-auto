@@ -33,24 +33,27 @@ TASK_LABELS = {
 }
 
 
-WINDOW_GEOMETRY = "685x471"
-WINDOW_MINSIZE = (685, 471)
+# GUI 视觉布局主参数：
+# 这里只定义窗口尺寸、三列宽度和局部留白，后续若需要微调界面观感，优先修改这里。
+WINDOW_GEOMETRY = "710x480"
+WINDOW_MINSIZE = (685, 480)
 NOTEBOOK_PADX = 2
 NOTEBOOK_PADY = 2
 TAB_PADDING = 3
-LEFT_PANEL_WIDTH = 205
+LEFT_PANEL_WIDTH = 222
 CENTER_PANEL_WIDTH = 250
-RIGHT_PANEL_WIDTH = 200
+RIGHT_PANEL_WIDTH = 218
 OUTER_PANEL_PADX = 2
 SECTION_PADDING = (4, 2)
-ROW_PADY_SMALL = 2
+ROW_PADY_SMALL = 6
 ROW_PADY_NORMAL = 2
 ACTION_ROW_TOP_PADY = 4
 START_BUTTON_HEIGHT = 1
 BOTTOM_HINT_HEIGHT = 0
 PREVIEW_TREE_HEIGHT = 6
 RUNTIME_TEXT_HEIGHT = 6
-TIPS_TEXT = "测试前请依次打开工作站和CHI600E，运行过程中不要全屏或最小化CHI660E程序窗口"
+# 中间列底部提醒文案，仅用于静态提示，不参与任何业务执行逻辑。
+TIPS_TEXT = "测试前请依次打开工作站和CHI600E，运行中不要全屏或最小化CHI660E程序窗口，填写参数和保存时尽量不要使用键盘鼠标，在长时间测试进行中可以使用"
 
 
 class _GuiQueueHandler(logging.Handler):
@@ -79,6 +82,8 @@ class Chi660eGuiApp:
         self.state = load_gui_state()
         self.current_page = self.state.selected_page
 
+        # 运行态对象：
+        # GUI 只负责发起与展示，真正 workflow 执行在后台线程中进行。
         self._event_queue: queue.Queue[tuple[str, str]] = queue.Queue()
         self._running = False
         self._run_control: RunControl | None = None
@@ -86,6 +91,8 @@ class Chi660eGuiApp:
         self._gui_log_handler: _GuiQueueHandler | None = None
         self._initializing = True
 
+        # 表单变量：
+        # _field_vars 保存输入框值，*_vars 保存勾选状态；GUI 不在这里解释业务含义。
         self._enable_vars: dict[str, tk.BooleanVar] = {}
         self._field_vars: dict[str, tk.StringVar] = {}
         self._cv_rate_vars: dict[float, tk.BooleanVar] = {}
@@ -93,6 +100,8 @@ class Chi660eGuiApp:
         self._page_frames: dict[str, ttk.Frame] = {}
         self._center_settings_frame: ttk.LabelFrame | None = None
 
+        # 展示态字符串：
+        # 仅用于界面显示，不作为 workflow 的真实配置来源。
         self._start_button_text = tk.StringVar(value="开始")
         self._page_title_text = tk.StringVar(value=TASK_LABELS.get(self.current_page, "CHI660E"))
         self._status_text = tk.StringVar(value="就绪")
@@ -120,6 +129,7 @@ class Chi660eGuiApp:
         except tk.TclError:
             pass
 
+        # 这里只定义 ttk 外观，不要把业务判断或动态状态切换塞到 style 层。
         style.configure("Compact.TNotebook", padding=0)
         style.configure("Compact.TNotebook.Tab", padding=(14, 6))
         style.configure("Section.TLabelframe", padding=SECTION_PADDING)
@@ -128,8 +138,10 @@ class Chi660eGuiApp:
         style.configure("Task.TButton", padding=(6, 1))
         style.configure("Compact.Treeview", rowheight=24)
         style.configure("Compact.Treeview.Heading", font=("Microsoft YaHei UI", 9, "bold"))
+        style.configure("TipsSubtle.TLabel", font=("Microsoft YaHei UI", 9),foreground="#464a50",)
 
     def _build_variables(self) -> None:
+        # 左侧任务区勾选框：只决定 segment 是否生成，不直接触发自动化行为。
         self._enable_vars = {
             "activation_cv": self._new_bool_var(self.state.enable_activation_cv),
             "eis_after_activation": self._new_bool_var(self.state.enable_eis_after_activation),
@@ -139,6 +151,7 @@ class Chi660eGuiApp:
             "eis_after_gcd": self._new_bool_var(self.state.enable_eis_after_gcd),
         }
 
+        # 输入框字段：GUI 负责收集与显示，后续如何解释这些值由 controller/workflow 层决定。
         for field_name in (
             "save_directory",
             "activation_high_e_v",
@@ -173,51 +186,68 @@ class Chi660eGuiApp:
         }
 
     def _new_string_var(self, value: str) -> tk.StringVar:
+        # 任一输入值变化，都统一回到 _on_form_changed 做预览刷新与持久化。
         variable = tk.StringVar(value=value)
         variable.trace_add("write", self._on_form_changed)
         return variable
 
     def _new_bool_var(self, value: bool) -> tk.BooleanVar:
+        # 布尔开关变化后也走同一条刷新链，保证左侧启用状态和右侧预览保持同步。
         variable = tk.BooleanVar(value=value)
         variable.trace_add("write", self._on_form_changed)
         return variable
 
     def _build_layout(self) -> None:
+        # 整体布局改为“左中宿主 + 右侧栏”：
+        # 左侧与中间共享同一个 2x2 网格宿主，便于左下/中下区域稳定对齐。
         notebook = ttk.Notebook(self.root, style="Compact.TNotebook")
         notebook.pack(fill="both", expand=True, padx=NOTEBOOK_PADX, pady=NOTEBOOK_PADY)
 
         tab = ttk.Frame(notebook, padding=TAB_PADDING)
         notebook.add(tab, text="CHI660E")
-        tab.columnconfigure(0, weight=0, minsize=LEFT_PANEL_WIDTH)
-        tab.columnconfigure(1, weight=1, minsize=CENTER_PANEL_WIDTH)
-        tab.columnconfigure(2, weight=0, minsize=RIGHT_PANEL_WIDTH)
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(1, weight=1, minsize=RIGHT_PANEL_WIDTH)
         tab.rowconfigure(0, weight=1)
 
-        left = ttk.Frame(tab)
-        center = ttk.Frame(tab)
+        lc_host = ttk.Frame(tab)
         right = ttk.Frame(tab)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, OUTER_PANEL_PADX))
-        center.grid(row=0, column=1, sticky="nsew", padx=(0, OUTER_PANEL_PADX))
-        right.grid(row=0, column=2, sticky="nsew")
+        lc_host.grid(row=0, column=0, sticky="nsew", padx=(0, OUTER_PANEL_PADX))
+        right.grid(row=0, column=1, sticky="nsew")
 
-        left.columnconfigure(0, weight=1)
-        center.columnconfigure(0, weight=1)
+        lc_host.columnconfigure(0, weight=1, minsize=LEFT_PANEL_WIDTH)
+        lc_host.columnconfigure(1, weight=1, minsize=CENTER_PANEL_WIDTH)
+        lc_host.rowconfigure(0, weight=1)
+        lc_host.rowconfigure(1, weight=0)
+
+        left_top = ttk.Frame(lc_host)
+        center_top = ttk.Frame(lc_host)
+        left_bottom_frame = ttk.Frame(lc_host)
+        center_bottom_frame = ttk.Frame(lc_host)
+        left_top.grid(row=0, column=0, sticky="nsew", padx=(0, OUTER_PANEL_PADX))
+        center_top.grid(row=0, column=1, sticky="nsew")
+        left_bottom_frame.grid(row=1, column=0, sticky="nsew", padx=(0, OUTER_PANEL_PADX), pady=(2, 0))
+        center_bottom_frame.grid(row=1, column=1, sticky="nsew", pady=(2, 0))
+
         right.columnconfigure(0, weight=1)
-        left.rowconfigure(0, weight=1)
-        left.rowconfigure(1, weight=0)
-        center.rowconfigure(2, weight=0)
+        right.rowconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
 
-        self._build_left_column(left)
-        self._build_center_column(center)
+        self._build_left_column(left_top)
+        self._build_center_column(center_top)
+        self._build_left_bottom_column(left_bottom_frame)
+        self._build_center_bottom_column(center_bottom_frame)
         self._build_right_column(right)
 
     def _build_left_column(self, parent: ttk.Frame) -> None:
+        # 左上块只处理任务启用、页面切换与任务区内部按钮。
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
+
         task_frame = ttk.LabelFrame(parent, text="任务区", style="Section.TLabelframe")
         task_frame.grid(row=0, column=0, sticky="nsew")
         task_frame.columnconfigure(0, weight=1)
-        task_frame.columnconfigure(1, weight=1)
-
+        task_frame.columnconfigure(1, weight=0)
+        
         for row_index, bucket in enumerate(TASK_BUCKET_ORDER):
             row = ttk.Frame(task_frame)
             row.grid(row=row_index, column=0, columnspan=3, sticky="ew", pady=ROW_PADY_SMALL)
@@ -245,7 +275,7 @@ class Chi660eGuiApp:
             column=0,
             columnspan=3,
             sticky="ew",
-            pady=(ACTION_ROW_TOP_PADY, ROW_PADY_SMALL),
+            pady=(ACTION_ROW_TOP_PADY, ROW_PADY_NORMAL),
         )
         action_row.columnconfigure((0, 1), weight=1)
         ttk.Button(action_row, text="全选", style="Small.TButton", command=self._select_all_tasks).grid(
@@ -255,11 +285,14 @@ class Chi660eGuiApp:
             row=0, column=1, sticky="ew", padx=(4, 0)
         )
 
-        spacer = ttk.Frame(parent)
-        spacer.grid(row=1, column=0, sticky="nsew")
+    def _build_left_bottom_column(self, parent: ttk.Frame) -> None:
+        # 左下块只承接全局设置与开始按钮，和中下 Tips 处于同一个宿主行内。
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=0)
+        parent.rowconfigure(1, weight=0)
 
         global_frame = ttk.LabelFrame(parent, text="全局设置", style="Section.TLabelframe")
-        global_frame.grid(row=2, column=0, sticky="ew", pady=(4, 2))
+        global_frame.grid(row=0, column=0, sticky="ew", pady=(0, 2))
         global_frame.columnconfigure(0, weight=1)
         ttk.Button(
             global_frame,
@@ -282,19 +315,25 @@ class Chi660eGuiApp:
             bd=0,
             cursor="hand2",
         )
-        self._start_button.grid(row=3, column=0, sticky="ew", pady=(1, 0))
+        self._start_button.grid(row=1, column=0, sticky="ew", pady=(1, 0))
 
     def _build_center_column(self, parent: ttk.Frame) -> None:
+        # 中间列采用“单容器多页面”结构：
+        # 所有页面都叠放在同一个 container 中，通过 tkraise 切换可见页。
         # 中间设置区标题直接挂到外框边线上，保证与左右分组框顶部对齐。
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
+
         self._center_settings_frame = ttk.LabelFrame(
             parent,
             text=TASK_LABELS.get(self.current_page, "CHI660E"),
             style="Section.TLabelframe",
         )
         content = self._center_settings_frame
-        content.grid(row=0, column=0, sticky="ew")
+        content.grid(row=0, column=0, sticky="nsew")
         content.columnconfigure(0, weight=1)
-        content.rowconfigure(0, weight=1)
+        content.rowconfigure(0, weight=0)
+        content.rowconfigure(1, weight=1)
 
         container = ttk.Frame(content)
         container.grid(row=0, column=0, sticky="nsew")
@@ -326,26 +365,33 @@ class Chi660eGuiApp:
         for frame in self._page_frames.values():
             frame.grid(row=0, column=0, sticky="nsew")
 
-        spacer = ttk.Frame(parent, height=0)
-        spacer.grid(row=1, column=0, sticky="nsew")
-        spacer.grid_propagate(False)
-        parent.rowconfigure(1, weight=1)
-        parent.rowconfigure(2, weight=0)
-        parent.rowconfigure(3, weight=0)
+        # 设置区内部留白只在外框内部吸收，保证页面内容始终贴顶显示。
+        inner_spacer = ttk.Frame(content)
+        inner_spacer.grid(row=1, column=0, sticky="nsew")
+
+    def _build_center_bottom_column(self, parent: ttk.Frame) -> None:
+        # Tips 只展示固定提醒，不做输入、不持久化，也不影响任何 workflow 参数。
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
 
         tips_frame = ttk.LabelFrame(parent, text="Tips", style="Section.TLabelframe")
-        tips_frame.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(2, 0))
+        tips_frame.grid(row=0, column=0, sticky="nsew")
         tips_frame.columnconfigure(0, weight=1)
+        
         ttk.Label(
             tips_frame,
             text=TIPS_TEXT,
             justify="left",
             wraplength=230,
-        ).grid(row=0, column=0, sticky="w")
+            anchor="w",
+            padding=(2, 1),
+            style="TipsSubtle.TLabel",
+        ).grid(row=0, column=0, sticky="nw")
 
     def _build_right_column(self, parent: ttk.Frame) -> None:
+        # 右列上半区是执行计划预览，下半区是运行日志；两者都属于只读展示区。
         preview_frame = ttk.LabelFrame(parent, text="执行计划预览", style="Section.TLabelframe")
-        preview_frame.grid(row=0, column=0, sticky="ew", pady=(0, OUTER_PANEL_PADX))
+        preview_frame.grid(row=0, column=0, sticky="nsew", pady=(0, OUTER_PANEL_PADX))
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.columnconfigure(1, weight=0)
         preview_frame.rowconfigure(0, weight=1)
@@ -361,9 +407,9 @@ class Chi660eGuiApp:
         self._preview_tree.heading("index", text="#")
         self._preview_tree.heading("name", text="任务")
         self._preview_tree.heading("status", text="状态")
-        self._preview_tree.column("index", width=24, minwidth=24, anchor="center", stretch=False)
-        self._preview_tree.column("name", width=104, minwidth=104, anchor="w", stretch=False)
-        self._preview_tree.column("status", width=42, minwidth=42, anchor="w", stretch=False)
+        self._preview_tree.column("index", width=24, minwidth=24, anchor="center", stretch=True)
+        self._preview_tree.column("name", width=104, minwidth=104, anchor="w", stretch=True)
+        self._preview_tree.column("status", width=42, minwidth=42, anchor="w", stretch=True)
         preview_scroll = ttk.Scrollbar(preview_frame, orient="vertical", command=self._preview_tree.yview)
         self._preview_tree.configure(yscrollcommand=preview_scroll.set)
         self._preview_tree.grid(row=0, column=0, sticky="nsew")
@@ -380,7 +426,7 @@ class Chi660eGuiApp:
             width=22,
             height=RUNTIME_TEXT_HEIGHT,
             wrap="word",
-            bg="#f6f8fb",
+            bg="#dcdad5",
             relief="flat",
             bd=0,
             font=("Consolas", 9),
@@ -445,6 +491,7 @@ class Chi660eGuiApp:
         return frame
 
     def _build_global_page(self, parent: ttk.Frame) -> ttk.Frame:
+        # 全局设置页当前只暴露存储路径；真正使用这个值的是后续 workflow 执行链。
         frame = ttk.Frame(parent)
         frame.columnconfigure(1, weight=1)
         ttk.Label(frame, text="存储路径").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=ROW_PADY_NORMAL)
@@ -463,13 +510,13 @@ class Chi660eGuiApp:
         return frame
 
     def _add_entry_row(self, parent: ttk.Frame, row: int, label: str, field_name: str) -> None:
-        parent.columnconfigure(0, weight=0, minsize=112)
-        parent.columnconfigure(1, weight=0)
+        parent.columnconfigure(0, weight=1, minsize=112)
+        parent.columnconfigure(1, weight=1)
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=ROW_PADY_NORMAL)
-        ttk.Entry(parent, textvariable=self._field_vars[field_name], width=11).grid(
+        ttk.Entry(parent, textvariable=self._field_vars[field_name], width=12).grid(
             row=row,
             column=1,
-            sticky="w",
+            sticky="e",
             padx=(0, 2),
             pady=ROW_PADY_NORMAL,
         )
@@ -482,12 +529,12 @@ class Chi660eGuiApp:
         options: tuple[float, ...],
         variables: dict[float, tk.BooleanVar],
     ) -> None:
-        parent.columnconfigure(0, weight=0, minsize=116)
+        parent.columnconfigure(0, weight=1, minsize=116)
         parent.columnconfigure(1, weight=0)
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="nw", padx=(0, 8), pady=ROW_PADY_NORMAL)
 
         group = ttk.Frame(parent)
-        group.grid(row=row, column=1, sticky="w", pady=ROW_PADY_SMALL)
+        group.grid(row=row, column=1, sticky="e", pady=ROW_PADY_NORMAL)
         for column in range(2):
             group.columnconfigure(column, weight=1)
 
@@ -498,10 +545,11 @@ class Chi660eGuiApp:
                 column=index % 2,
                 sticky="w",
                 padx=(0, 6),
-                pady=ROW_PADY_SMALL,
+                pady=ROW_PADY_NORMAL,
             )
 
     def _show_page(self, page_key: str) -> None:
+        # 切页只更新界面展示状态，不在这里做业务校验或自动化动作。
         if page_key not in self._page_frames:
             page_key = PAGE_GLOBAL_SETTINGS
         self.current_page = page_key
@@ -543,6 +591,7 @@ class Chi660eGuiApp:
         self._refresh_preview()
 
     def _refresh_preview(self) -> None:
+        # 预览列表完全基于 controller 构造出的 segments，不在 GUI 层复制业务规则。
         for item in self._preview_tree.get_children():
             self._preview_tree.delete(item)
 
@@ -562,6 +611,7 @@ class Chi660eGuiApp:
             self._preview_tree.insert("", "end", values=(index, segment.display_name, status))
 
     def _append_runtime_log(self, text: str) -> None:
+        # 日志框只追加文本，保持只读；用户不应直接编辑运行记录。
         self._runtime_text.configure(state="normal")
         self._runtime_text.insert("end", f"{text}\n")
         self._runtime_text.see("end")
@@ -603,6 +653,7 @@ class Chi660eGuiApp:
         self._field_vars["save_directory"].set(selected)
 
     def _on_start_pause_clicked(self) -> None:
+        # GUI 只负责发起“开始/暂停”请求，真正执行仍由后台 workflow 线程处理。
         if self._running:
             if self._run_control is not None:
                 self._run_control.request_stop()
