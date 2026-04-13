@@ -36,6 +36,17 @@ def _append_post_run_event(
     append_event(context.replay_record, event_name, detail, level=level)
 
 
+def _emit_gui_event(context: RuntimeContext, event_type: str, payload: dict[str, Any]) -> None:
+    sink = getattr(context, "gui_event_sink", None)
+    if sink is None:
+        return
+    sink(event_type, payload)
+
+
+def _emit_runtime_message(context: RuntimeContext, message: str) -> None:
+    _emit_gui_event(context, "runtime_message", {"message": message})
+
+
 def _bind_main_window(context: RuntimeContext, capture_name: str) -> RuntimeContext:
     return bind_runtime_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, capture_name)
 
@@ -80,82 +91,97 @@ def _double_click_main_window_center(context: RuntimeContext) -> dict[str, Any]:
 
 
 def ensure_main_idle_before_run(context: RuntimeContext) -> dict[str, Any]:
-    _raise_if_stop_requested(context, "post_run_idle_before_bind")
-    _bind_main_window(context, "post_run_main_idle")
+    _emit_runtime_message(context, "确认主界面空闲")
+    try:
+        _raise_if_stop_requested(context, "post_run_idle_before_bind")
+        _bind_main_window(context, "post_run_main_idle")
 
-    disabled_first = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
-    usable_first = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
-    context.logger.info(
-        "Main idle precheck: disabled=%s score=%.6f usable=%s score=%.6f",
-        disabled_first.matched,
-        disabled_first.score,
-        usable_first.matched,
-        usable_first.score,
-    )
+        disabled_first = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
+        usable_first = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
+        context.logger.info(
+            "Main idle precheck: disabled=%s score=%.6f usable=%s score=%.6f",
+            disabled_first.matched,
+            disabled_first.score,
+            usable_first.matched,
+            usable_first.score,
+        )
 
-    if usable_first.matched:
-        raise Chi660eAutoError("当前已有正在运行的任务，请取消后重试。")
-    if not disabled_first.matched:
-        raise Chi660eAutoError("主窗口状态不明确，无法确认是否空闲。")
+        if usable_first.matched:
+            raise Chi660eAutoError("当前已有正在运行的任务，请取消后重试。")
+        if not disabled_first.matched:
+            raise Chi660eAutoError("主窗口状态不明确，无法确认是否空闲。")
 
-    _sleep_with_stop(context, RUN_START_CONFIRM_INTERVAL_SEC, "post_run_idle_stable_confirm")
-    disabled_second = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
-    usable_second = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
-    context.logger.info(
-        "Main idle stable confirm: disabled=%s score=%.6f usable=%s score=%.6f",
-        disabled_second.matched,
-        disabled_second.score,
-        usable_second.matched,
-        usable_second.score,
-    )
+        _sleep_with_stop(context, RUN_START_CONFIRM_INTERVAL_SEC, "post_run_idle_stable_confirm")
+        disabled_second = run_visual_action_once_in_context(context, "Main_CheckPauseDisabled")
+        usable_second = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
+        context.logger.info(
+            "Main idle stable confirm: disabled=%s score=%.6f usable=%s score=%.6f",
+            disabled_second.matched,
+            disabled_second.score,
+            usable_second.matched,
+            usable_second.score,
+        )
 
-    if disabled_second.matched and not usable_second.matched:
-        result = {
-            "idle": True,
-            "disabled_score": disabled_second.score,
-            "usable_score": usable_second.score,
-        }
-        _append_post_run_event(context, "main_idle_confirmed", result)
-        return result
+        if disabled_second.matched and not usable_second.matched:
+            result = {
+                "idle": True,
+                "disabled_score": disabled_second.score,
+                "usable_score": usable_second.score,
+            }
+            _append_post_run_event(context, "main_idle_confirmed", result)
+            return result
 
-    raise Chi660eAutoError("主窗口空闲状态稳定确认失败。")
+        raise Chi660eAutoError("主窗口空闲状态稳定确认失败。")
+    except Exception as exc:
+        if context.run_control is not None and context.run_control.is_stop_requested():
+            raise
+        _emit_runtime_message(context, f"主界面空闲检查失败：{exc}")
+        raise
 
 
 def start_run_and_confirm(context: RuntimeContext) -> dict[str, Any]:
-    _raise_if_stop_requested(context, "post_run_before_run")
-    _bind_main_window(context, "post_run_main_before_run")
-    run_result = run_visual_action_click_in_context(context, "Main_ClickRun")
-    _append_post_run_event(
-        context,
-        "run_clicked",
-        {
-            "click_point": run_result.click_point,
-            "score": run_result.score,
-        },
-    )
-
-    deadline = time.monotonic() + RUN_START_CONFIRM_TIMEOUT_SEC
-    attempt = 0
-    while time.monotonic() < deadline:
-        attempt += 1
-        pause_usable = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
-        context.logger.info(
-            "Run start confirm poll: attempt=%s matched=%s score=%.6f",
-            attempt,
-            pause_usable.matched,
-            pause_usable.score,
+    _emit_runtime_message(context, "点击 Run 按钮")
+    try:
+        _raise_if_stop_requested(context, "post_run_before_run")
+        _bind_main_window(context, "post_run_main_before_run")
+        run_result = run_visual_action_click_in_context(context, "Main_ClickRun")
+        _append_post_run_event(
+            context,
+            "run_clicked",
+            {
+                "click_point": run_result.click_point,
+                "score": run_result.score,
+            },
         )
-        if pause_usable.matched:
-            result = {
-                "started": True,
-                "attempt": attempt,
-                "score": pause_usable.score,
-            }
-            _append_post_run_event(context, "run_started_confirmed", result)
-            return result
-        _sleep_with_stop(context, RUN_START_CONFIRM_INTERVAL_SEC, "post_run_run_start_confirm")
 
-    raise Chi660eAutoError("点击 Run 后 5 秒内未确认任务已启动。")
+        deadline = time.monotonic() + RUN_START_CONFIRM_TIMEOUT_SEC
+        attempt = 0
+        while time.monotonic() < deadline:
+            attempt += 1
+            pause_usable = run_visual_action_once_in_context(context, "Main_CheckPauseUsable")
+            context.logger.info(
+                "Run start confirm poll: attempt=%s matched=%s score=%.6f",
+                attempt,
+                pause_usable.matched,
+                pause_usable.score,
+            )
+            if pause_usable.matched:
+                result = {
+                    "started": True,
+                    "attempt": attempt,
+                    "score": pause_usable.score,
+                }
+                _emit_runtime_message(context, "测试任务开始")
+                _append_post_run_event(context, "run_started_confirmed", result)
+                return result
+            _sleep_with_stop(context, RUN_START_CONFIRM_INTERVAL_SEC, "post_run_run_start_confirm")
+
+        _emit_runtime_message(context, "测试启动确认失败：5 秒内未确认任务启动")
+        raise Chi660eAutoError("点击 Run 后 5 秒内未确认任务已启动。")
+    except Exception:
+        if context.run_control is not None and context.run_control.is_stop_requested():
+            raise
+        raise
 
 
 def wait_until_run_finished(
@@ -168,6 +194,7 @@ def wait_until_run_finished(
     while True:
         _raise_if_stop_requested(context, "post_run_run_finish_poll")
         if max_wait_sec is not None and time.monotonic() - start_monotonic > max_wait_sec:
+            _emit_runtime_message(context, "运行等待超时")
             raise Chi660eAutoError("运行等待超时。")
 
         _sleep_with_stop(context, RUN_FINISH_POLL_SEC, "post_run_run_finish_poll_sleep")
@@ -230,6 +257,7 @@ def wait_until_run_finished(
                     poll_count,
                     pause_disabled_confirm.score,
                 )
+                _emit_runtime_message(context, "检测到运行结束")
                 _append_post_run_event(context, "run_finished_confirmed", result)
                 return result
         except Exception as exc:
@@ -250,6 +278,7 @@ def save_result_via_save_as(
     save_directory: str | Path,
     file_name: str,
 ) -> dict[str, Any]:
+    _emit_runtime_message(context, "点击 Save As 按钮")
     _raise_if_stop_requested(context, "post_run_before_save")
     context.logger.info(
         "Save target requested: directory=%s filename=%s",
@@ -271,7 +300,11 @@ def save_result_via_save_as(
         },
     )
 
-    save_result = save_as_txt(save_directory, file_name, logger=context.logger)
+    try:
+        save_result = save_as_txt(save_directory, file_name, logger=context.logger)
+    except Exception as exc:
+        _emit_runtime_message(context, f"保存失败：{exc}")
+        raise
     file_path = Path(save_result["file_path"])
     context.logger.info(
         "Save As dialog bound: title=%s class=%s hwnd=%s",
@@ -296,6 +329,7 @@ def save_result_via_save_as(
             "confirm_method": save_result["confirm_result"]["method"],
         },
     )
+    _emit_runtime_message(context, f"保存结果 {file_path.name}")
 
     _bind_main_window(context, "post_run_main_after_save")
     return {

@@ -84,6 +84,38 @@ def _minutes_to_seconds(text: str, field_name: str) -> int:
     return max(0, int(minutes * 60))
 
 
+def _resolve_selected_cv_scan_rates_mv(state: WorkflowGuiState) -> list[float]:
+    values: list[float] = []
+    for index in state.cv_scan_rate_selected_indices:
+        try:
+            raw_value = str(state.cv_scan_rate_entry_values_mv[index]).strip()
+        except IndexError as exc:
+            raise ValueError(f"CV Scan Rate 第 {index + 1} 项索引无效。") from exc
+        if not raw_value:
+            raise ValueError(f"CV Scan Rate 第 {index + 1} 项不能为空。")
+        try:
+            values.append(float(raw_value))
+        except ValueError as exc:
+            raise ValueError(f"CV Scan Rate 第 {index + 1} 项不是有效数字。") from exc
+    return values
+
+
+def _resolve_selected_gcd_current_densities_ma_cm2(state: WorkflowGuiState) -> list[float]:
+    values: list[float] = []
+    for index in state.gcd_current_density_selected_indices:
+        try:
+            raw_value = str(state.gcd_current_density_entry_values_ma_cm2[index]).strip()
+        except IndexError as exc:
+            raise ValueError(f"GCD 电流密度第 {index + 1} 项索引无效。") from exc
+        if not raw_value:
+            raise ValueError(f"GCD 电流密度第 {index + 1} 项不能为空。")
+        try:
+            values.append(float(raw_value))
+        except ValueError as exc:
+            raise ValueError(f"GCD 电流密度第 {index + 1} 项不是有效数字。") from exc
+    return values
+
+
 def move_segment_bucket(state: WorkflowGuiState, bucket: str, direction: int) -> None:
     """保留未来扩展用；当前 GUI 固定顺序，本轮不在界面中暴露。"""
     try:
@@ -133,7 +165,7 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
             continue
 
         if bucket == "cv_series" and state.enable_cv_series:
-            for scan_rate_mv in state.cv_scan_rates_mv:
+            for scan_rate_mv in _resolve_selected_cv_scan_rates_mv(state):
                 segments.append(
                     build_cv_series_item_segment(
                         order=order,
@@ -169,7 +201,7 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
         if bucket == "gcd_series" and state.enable_gcd_series:
             electrode_area_cm2 = _parse_float(state.gcd_area_cm2, "GCD 面积")
             high_e_limit_v = _parse_float(state.gcd_high_e_limit_v, "GCD High E limit")
-            for density in state.gcd_current_densities_ma_cm2:
+            for density in _resolve_selected_gcd_current_densities_ma_cm2(state):
                 segments.append(
                     build_gcd_series_item_segment(
                         order=order,
@@ -228,4 +260,3 @@ def build_default_execution_plan_preview() -> list[str]:
 
 def build_default_segment_plan_for_gui() -> list[WorkflowSegment]:
     return build_default_segment_plan()
-

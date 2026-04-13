@@ -13,7 +13,7 @@ from typing import Any
 from app.bootstrap import bootstrap_app
 from app.errors import Chi660eAutoError
 from app.post_run_flow import run_post_run_public_flow
-from app.run_control import RunControl, sleep_with_run_control
+from app.run_control import RunControl, RunStopRequested, sleep_with_run_control
 from app.replay_manager import append_event, finalize_session
 from app.runtime_context import RuntimeContext
 from app.task_runner import (
@@ -47,6 +47,13 @@ def _append_workflow_event(
     append_event(context.replay_record, event_name, detail, level=level)
 
 
+def _emit_gui_event(context: RuntimeContext, event_type: str, payload: dict[str, Any]) -> None:
+    sink = getattr(context, "gui_event_sink", None)
+    if sink is None:
+        return
+    sink(event_type, payload)
+
+
 def _raise_if_stop_requested(context: RuntimeContext, stage: str) -> None:
     run_control = getattr(context, "run_control", None)
     if run_control is None:
@@ -54,7 +61,7 @@ def _raise_if_stop_requested(context: RuntimeContext, stage: str) -> None:
     run_control.raise_if_stop_requested(stage)
 
 
-def _run_rest_segment(context: RuntimeContext, segment: WorkflowSegment) -> None:
+def _run_rest_segment(context: RuntimeContext, segment: WorkflowSegment, runtime_key: str) -> None:
     duration_sec = int(segment.params["duration_sec"])
     context.logger.info("Rest segment start: name=%s duration=%ss", segment.display_name, duration_sec)
     _append_workflow_event(
@@ -62,11 +69,65 @@ def _run_rest_segment(context: RuntimeContext, segment: WorkflowSegment) -> None
         "workflow_segment_rest_start",
         {"segment_id": segment.segment_id, "display_name": segment.display_name, "duration_sec": duration_sec},
     )
-    sleep_with_run_control(context.run_control, max(0, duration_sec), stage=f"rest:{segment.display_name}")
+    _emit_gui_event(
+        context,
+        "rest_start",
+        {
+            "runtime_key": runtime_key,
+            "segment_id": segment.segment_id,
+            "display_name": segment.display_name,
+            "duration_sec": duration_sec,
+        },
+    )
+
+    remaining_sec = max(0, duration_sec)
+    _emit_gui_event(
+        context,
+        "rest_tick",
+        {
+            "runtime_key": runtime_key,
+            "segment_id": segment.segment_id,
+            "display_name": segment.display_name,
+            "remaining_sec": remaining_sec,
+        },
+    )
+
+    deadline = time.monotonic() + remaining_sec
+    last_remaining = remaining_sec
+    while remaining_sec > 0:
+        _raise_if_stop_requested(context, f"rest:{segment.display_name}")
+        sleep_with_run_control(
+            context.run_control,
+            min(1.0, max(0.0, deadline - time.monotonic())),
+            stage=f"rest:{segment.display_name}",
+        )
+        remaining_sec = max(0, int(round(deadline - time.monotonic())))
+        if remaining_sec != last_remaining:
+            _emit_gui_event(
+                context,
+                "rest_tick",
+                {
+                    "runtime_key": runtime_key,
+                    "segment_id": segment.segment_id,
+                    "display_name": segment.display_name,
+                    "remaining_sec": remaining_sec,
+                },
+            )
+            last_remaining = remaining_sec
+
     _append_workflow_event(
         context,
         "workflow_segment_rest_completed",
         {"segment_id": segment.segment_id, "display_name": segment.display_name},
+    )
+    _emit_gui_event(
+        context,
+        "rest_completed",
+        {
+            "runtime_key": runtime_key,
+            "segment_id": segment.segment_id,
+            "display_name": segment.display_name,
+        },
     )
 
 
@@ -110,7 +171,12 @@ def _raise_workflow_validation_error(issues: list[dict[str, Any]]) -> None:
     raise Chi660eAutoError(f"Workflow contains non-runnable segments: {summary}")
 
 
-def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directory: str | Path) -> None:
+def _run_segment(
+    context: RuntimeContext,
+    segment: WorkflowSegment,
+    save_directory: str | Path,
+    runtime_key: str,
+) -> None:
     _raise_if_stop_requested(context, f"segment_start:{segment.display_name}")
     if not segment_is_runnable(segment):
         raise Chi660eAutoError(
@@ -158,8 +224,8 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
             context,
             save_directory=save_directory,
             file_name=output_name,
-            double_click_main_center_after_run=segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION,
-            double_click_main_center_delay_sec=10.0 if segment.segment_type == WorkflowSegmentType.EIS_AFTER_ACTIVATION else 0.0,
+            double_click_main_center_after_run=True,
+            double_click_main_center_delay_sec=10.0,
         )
         _append_workflow_event(
             context,
@@ -208,7 +274,7 @@ def _run_segment(context: RuntimeContext, segment: WorkflowSegment, save_directo
         return
 
     if segment_is_rest(segment):
-        _run_rest_segment(context, segment)
+        _run_rest_segment(context, segment, runtime_key)
         return
 
     raise NotImplementedError(
@@ -230,7 +296,11 @@ def run_workflow_segments(
     runtime_context.run_control = run_control
 
     try:
+        current_segment: WorkflowSegment | None = None
+        current_runtime_key = ""
         for index, segment in enumerate(ordered_segments, start=1):
+            current_segment = segment
+            current_runtime_key = f"{index}:{segment.segment_id}"
             _raise_if_stop_requested(runtime_context, f"workflow_before_segment:{segment.display_name}")
             output_name = build_output_filename_for_segment(segment)
             runtime_context.logger.info(
@@ -255,8 +325,20 @@ def run_workflow_segments(
                     "density": segment.params.get("current_density_ma_cm2"),
                 },
             )
+            _emit_gui_event(
+                runtime_context,
+                "segment_start",
+                {
+                    "runtime_key": current_runtime_key,
+                    "index": index,
+                    "total": len(ordered_segments),
+                    "segment_id": segment.segment_id,
+                    "segment_type": segment.segment_type.value,
+                    "display_name": segment.display_name,
+                },
+            )
 
-            _run_segment(runtime_context, segment, save_directory)
+            _run_segment(runtime_context, segment, save_directory, current_runtime_key)
             _raise_if_stop_requested(runtime_context, f"workflow_after_segment:{segment.display_name}")
 
             runtime_context.logger.info(
@@ -277,17 +359,52 @@ def run_workflow_segments(
                     "display_name": segment.display_name,
                 },
             )
+            _emit_gui_event(
+                runtime_context,
+                "segment_completed",
+                {
+                    "runtime_key": current_runtime_key,
+                    "index": index,
+                    "total": len(ordered_segments),
+                    "segment_id": segment.segment_id,
+                    "segment_type": segment.segment_type.value,
+                    "display_name": segment.display_name,
+                },
+            )
+            current_segment = None
+            current_runtime_key = ""
 
         if runtime_context.replay_record is not None and context is None:
             finalize_session(runtime_context.replay_record, status="completed")
         return runtime_context
+    except RunStopRequested:
+        raise
     except Exception as exc:
         runtime_context.logger.exception("Workflow execution failed.")
         _append_workflow_event(
             runtime_context,
             "workflow_segment_failed",
-            {"error": str(exc)},
+            {
+                "segment_id": current_segment.segment_id if current_segment is not None else "",
+                "display_name": current_segment.display_name if current_segment is not None else "",
+                "error": str(exc),
+            },
             level="ERROR",
+        )
+        _emit_gui_event(
+            runtime_context,
+            "segment_failed",
+            {
+                "runtime_key": current_runtime_key,
+                "segment_id": current_segment.segment_id if current_segment is not None else "",
+                "display_name": current_segment.display_name if current_segment is not None else "",
+                "error": str(exc),
+            },
+        )
+        _emit_gui_event(
+            runtime_context,
+            "runtime_message",
+            {"message": f"运行失败：{exc}"},
         )
         if runtime_context.replay_record is not None and context is None:
             finalize_session(runtime_context.replay_record, status="error", error=str(exc))

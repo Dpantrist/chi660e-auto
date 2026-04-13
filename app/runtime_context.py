@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.dto import AppStatus, ReplayRecord, WindowInfo, WindowSession
 
@@ -23,3 +23,6 @@ class RuntimeContext:
     replay_record: ReplayRecord | None = None
     last_action_completed_at: float | None = None
     run_control: Any = None
+    # GUI 事件回调：
+    # 仅用于把结构化运行态信息回传给界面，不替代 logger / replay 记录链。
+    gui_event_sink: Callable[[str, dict[str, Any]], None] | None = None

@@ -218,6 +218,20 @@ VISUAL_ACTION_SPECS: dict[str, VisualActionSpec] = {
         max_attempts=1,
         allow_pipeline_fallback=False,
     ),
+    "CV_FocusInitialScanPolarity": VisualActionSpec(
+        name="CV_FocusInitialScanPolarity",
+        template="cv/cv_label_initial_scan_polarity.png",
+        mode=VisualActionMode.WINDOW_FIXED_COLUMN_ROW_CLICK,
+        column_x1=286,
+        column_x2=444,
+        row_top_offset=2,
+        row_height=37,
+        dropdown_option_offsets={
+            "Positive": (0, 72),
+        },
+        max_attempts=1,
+        allow_pipeline_fallback=False,
+    ),
     "CV_ClickOK": VisualActionSpec(
         name="CV_ClickOK",
         template="cv/cv_btn_ok_usable.png",

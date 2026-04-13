@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from app.bootstrap import bootstrap_app, find_blocking_child_windows
 from app.constants import APP_NAME
 from app.gui_controller import build_segments_from_gui_state
 from app.gui_models import (
@@ -53,8 +55,11 @@ BOTTOM_HINT_HEIGHT = 0
 PREVIEW_TREE_HEIGHT = 6
 RUNTIME_TEXT_HEIGHT = 6
 # 中间列底部提醒文案，仅用于静态提示，不参与任何业务执行逻辑。
-TIPS_TEXT = "测试前请依次打开工作站和CHI600E，运行中不要全屏或最小化CHI660E程序窗口，填写参数和保存时尽量不要使用键盘鼠标，在长时间测试进行中可以使用"
-
+TIPS_TEXT = (
+    "• 开始测试前先打开工作站和 CHI660E\n"
+    "• 开始测试前请先完成存储路径填写并保存\n"
+    "• 运行中不要全屏或最小化 CHI660E"
+)
 
 class _GuiQueueHandler(logging.Handler):
     """把后台线程日志转发到 GUI 队列。"""
@@ -85,6 +90,7 @@ class Chi660eGuiApp:
         # 运行态对象：
         # GUI 只负责发起与展示，真正 workflow 执行在后台线程中进行。
         self._event_queue: queue.Queue[tuple[str, str]] = queue.Queue()
+        self._launching = False
         self._running = False
         self._run_control: RunControl | None = None
         self._worker_thread: threading.Thread | None = None
@@ -95,10 +101,16 @@ class Chi660eGuiApp:
         # _field_vars 保存输入框值，*_vars 保存勾选状态；GUI 不在这里解释业务含义。
         self._enable_vars: dict[str, tk.BooleanVar] = {}
         self._field_vars: dict[str, tk.StringVar] = {}
-        self._cv_rate_vars: dict[float, tk.BooleanVar] = {}
-        self._gcd_density_vars: dict[float, tk.BooleanVar] = {}
+        self._cv_rate_vars: dict[int, tk.BooleanVar] = {}
+        self._cv_rate_value_vars: dict[int, tk.StringVar] = {}
+        self._gcd_density_vars: dict[int, tk.BooleanVar] = {}
+        self._gcd_density_value_vars: dict[int, tk.StringVar] = {}
         self._page_frames: dict[str, ttk.Frame] = {}
         self._center_settings_frame: ttk.LabelFrame | None = None
+        self._preview_status_by_runtime_key: dict[str, str] = {}
+        self._running_segments_snapshot: list = []
+        self._active_runtime_key: str | None = None
+        self._last_runtime_message: str | None = None
 
         # 展示态字符串：
         # 仅用于界面显示，不作为 workflow 的真实配置来源。
@@ -176,14 +188,25 @@ class Chi660eGuiApp:
         ):
             self._field_vars[field_name] = self._new_string_var(str(getattr(self.state, field_name)))
 
-        self._cv_rate_vars = {
-            float(value): self._new_bool_var(float(value) in self.state.cv_scan_rates_mv)
-            for value in CV_SCAN_RATE_OPTIONS_MV
-        }
-        self._gcd_density_vars = {
-            float(value): self._new_bool_var(float(value) in self.state.gcd_current_densities_ma_cm2)
-            for value in GCD_CURRENT_DENSITY_OPTIONS_MA_CM2
-        }
+        self._cv_rate_vars = {}
+        self._cv_rate_value_vars = {}
+        for index, _value in enumerate(CV_SCAN_RATE_OPTIONS_MV):
+            self._cv_rate_vars[index] = self._new_bool_var(
+                index in self.state.cv_scan_rate_selected_indices
+            )
+            self._cv_rate_value_vars[index] = self._new_string_var(
+                self.state.cv_scan_rate_entry_values_mv[index]
+            )
+
+        self._gcd_density_vars = {}
+        self._gcd_density_value_vars = {}
+        for index, _value in enumerate(GCD_CURRENT_DENSITY_OPTIONS_MA_CM2):
+            self._gcd_density_vars[index] = self._new_bool_var(
+                index in self.state.gcd_current_density_selected_indices
+            )
+            self._gcd_density_value_vars[index] = self._new_string_var(
+                self.state.gcd_current_density_entry_values_ma_cm2[index]
+            )
 
     def _new_string_var(self, value: str) -> tk.StringVar:
         # 任一输入值变化，都统一回到 _on_form_changed 做预览刷新与持久化。
@@ -471,8 +494,9 @@ class Chi660eGuiApp:
             label="Scan Rate (mV/s)",
             options=CV_SCAN_RATE_OPTIONS_MV,
             variables=self._cv_rate_vars,
+            value_vars=self._cv_rate_value_vars,
         )
-        self._add_entry_row(frame, 2, "Sweep Segments", "cv_sweep_segments")
+        self._add_entry_row(frame, 3, "Sweep Segments", "cv_sweep_segments")
         return frame
 
     def _build_gcd_page(self, parent: ttk.Frame) -> ttk.Frame:
@@ -484,10 +508,11 @@ class Chi660eGuiApp:
             label="电流密度（mA/cm2）",
             options=GCD_CURRENT_DENSITY_OPTIONS_MA_CM2,
             variables=self._gcd_density_vars,
+            value_vars=self._gcd_density_value_vars,
         )
-        self._add_entry_row(frame, 2, "High E limit (V)", "gcd_high_e_limit_v")
-        self._add_entry_row(frame, 3, "Data Storage Intvl (sec)", "gcd_data_storage_interval_sec")
-        self._add_entry_row(frame, 4, "Number of Segments", "gcd_number_of_segments")
+        self._add_entry_row(frame, 3, "High E limit (V)", "gcd_high_e_limit_v")
+        self._add_entry_row(frame, 4, "Data Storage Intvl (sec)", "gcd_data_storage_interval_sec")
+        self._add_entry_row(frame, 5, "Number of Segments", "gcd_number_of_segments")
         return frame
 
     def _build_global_page(self, parent: ttk.Frame) -> ttk.Frame:
@@ -513,7 +538,7 @@ class Chi660eGuiApp:
         parent.columnconfigure(0, weight=1, minsize=112)
         parent.columnconfigure(1, weight=1)
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=ROW_PADY_NORMAL)
-        ttk.Entry(parent, textvariable=self._field_vars[field_name], width=12).grid(
+        ttk.Entry(parent, textvariable=self._field_vars[field_name], width=7).grid(
             row=row,
             column=1,
             sticky="e",
@@ -527,25 +552,37 @@ class Chi660eGuiApp:
         row: int,
         label: str,
         options: tuple[float, ...],
-        variables: dict[float, tk.BooleanVar],
+        variables: dict[int, tk.BooleanVar],
+        value_vars: dict[int, tk.StringVar],
     ) -> None:
         parent.columnconfigure(0, weight=1, minsize=116)
-        parent.columnconfigure(1, weight=0)
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="nw", padx=(0, 8), pady=ROW_PADY_NORMAL)
+        parent.columnconfigure(1, weight=1)
+        ttk.Label(parent, text=label).grid(row=row, column=0, columnspan=2, sticky="nw", padx=(0, 8), pady=ROW_PADY_NORMAL)
 
         group = ttk.Frame(parent)
-        group.grid(row=row, column=1, sticky="e", pady=ROW_PADY_NORMAL)
-        for column in range(2):
+        group.grid(row=row + 1, column=0, columnspan=2, sticky="nsew", pady=ROW_PADY_NORMAL)
+        for column in range(3):
             group.columnconfigure(column, weight=1)
 
-        for index, value in enumerate(options):
-            text = f"{float(value):g}"
-            ttk.Checkbutton(group, text=text, variable=variables[float(value)]).grid(
-                row=index // 2,
-                column=index % 2,
+        for index, _value in enumerate(options):
+            item_frame = ttk.Frame(group)
+            item_frame.grid(
+                row=index // 3,
+                column=index % 3,
                 sticky="w",
                 padx=(0, 6),
                 pady=ROW_PADY_NORMAL,
+            )
+            ttk.Checkbutton(item_frame, variable=variables[index]).grid(
+                row=0,
+                column=0,
+                sticky="w",
+                padx=(0, 4),
+            )
+            ttk.Entry(item_frame, textvariable=value_vars[index], width=4).grid(
+                row=0,
+                column=1,
+                sticky="w",
             )
 
     def _show_page(self, page_key: str) -> None:
@@ -576,12 +613,43 @@ class Chi660eGuiApp:
         for field_name, variable in self._field_vars.items():
             setattr(self.state, field_name, variable.get())
 
-        self.state.cv_scan_rates_mv = [
-            value for value, variable in sorted(self._cv_rate_vars.items()) if variable.get()
+        self.state.cv_scan_rate_entry_values_mv = [
+            self._cv_rate_value_vars[index].get()
+            for index in range(len(CV_SCAN_RATE_OPTIONS_MV))
         ]
-        self.state.gcd_current_densities_ma_cm2 = [
-            value for value, variable in sorted(self._gcd_density_vars.items()) if variable.get()
+        self.state.cv_scan_rate_selected_indices = [
+            index
+            for index in range(len(CV_SCAN_RATE_OPTIONS_MV))
+            if self._cv_rate_vars[index].get()
         ]
+        self.state.cv_scan_rates_mv = []
+        for index in self.state.cv_scan_rate_selected_indices:
+            raw_value = self.state.cv_scan_rate_entry_values_mv[index].strip()
+            if not raw_value:
+                continue
+            try:
+                self.state.cv_scan_rates_mv.append(float(raw_value))
+            except ValueError:
+                continue
+
+        self.state.gcd_current_density_entry_values_ma_cm2 = [
+            self._gcd_density_value_vars[index].get()
+            for index in range(len(GCD_CURRENT_DENSITY_OPTIONS_MA_CM2))
+        ]
+        self.state.gcd_current_density_selected_indices = [
+            index
+            for index in range(len(GCD_CURRENT_DENSITY_OPTIONS_MA_CM2))
+            if self._gcd_density_vars[index].get()
+        ]
+        self.state.gcd_current_densities_ma_cm2 = []
+        for index in self.state.gcd_current_density_selected_indices:
+            raw_value = self.state.gcd_current_density_entry_values_ma_cm2[index].strip()
+            if not raw_value:
+                continue
+            try:
+                self.state.gcd_current_densities_ma_cm2.append(float(raw_value))
+            except ValueError:
+                continue
 
     def _on_form_changed(self, *_args: object) -> None:
         if self._initializing:
@@ -590,15 +658,184 @@ class Chi660eGuiApp:
         save_gui_state(self.state)
         self._refresh_preview()
 
+    def _get_preview_segments(self):
+        if self._running_segments_snapshot:
+            return self._running_segments_snapshot
+        return sort_enabled_segments(build_segments_from_gui_state(self.state))
+
+    def _build_runtime_key(self, index: int, segment) -> str:
+        return f"{index}:{segment.segment_id}"
+
+    def _format_rest_countdown(self, remaining_sec: int) -> str:
+        minutes, seconds = divmod(max(0, int(remaining_sec)), 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _append_runtime_message(self, text: str) -> None:
+        # 当前进程记录只展示“时间戳 + 简洁动作描述”，不直接展示后台原始 logger 文本。
+        if text == self._last_runtime_message:
+            return
+        timestamp = time.strftime("%H:%M:%S")
+        self._runtime_text.configure(state="normal")
+        self._runtime_text.insert("end", f"{timestamp} {text}\n")
+        self._runtime_text.see("end")
+        self._runtime_text.configure(state="disabled")
+        self._last_runtime_message = text
+
+    def _check_blocking_child_windows_before_start(self) -> str | None:
+        blocking_windows = find_blocking_child_windows()
+        if not blocking_windows:
+            return None
+        return blocking_windows[0]
+
+    def _format_launch_error_message(self, exc: BaseException) -> str:
+        text = str(exc).strip()
+        if not text:
+            return "启动失败：无法完成 CHI660E 主窗口检查"
+        if "主界面存在未关闭子窗口" in text:
+            return "启动失败：CHI660E 主界面存在未关闭子窗口，请先关闭后重试"
+        return f"启动失败：{text}"
+
+    def _reset_runtime_preview_state(self) -> None:
+        self._running_segments_snapshot = []
+        self._preview_status_by_runtime_key = {}
+        self._active_runtime_key = None
+
+    def _reset_launch_and_run_state(self) -> None:
+        self._launching = False
+        self._running = False
+        self._run_control = None
+        self._worker_thread = None
+        self._reset_runtime_preview_state()
+        self._start_button_text.set("开始")
+
+    def _handle_launch_failed(self, payload: dict[str, object]) -> None:
+        message = str(payload.get("message") or "启动失败").strip() or "启动失败"
+        self._reset_launch_and_run_state()
+        self._refresh_preview()
+        self._status_text.set("启动失败")
+        self._append_runtime_message(message)
+
+    def _handle_launch_cancelled(self) -> None:
+        self._reset_launch_and_run_state()
+        self._refresh_preview()
+        self._status_text.set("已取消启动")
+        self._append_runtime_message("已取消启动")
+
+    def _handle_run_entered(self) -> None:
+        self._launching = False
+        self._running = True
+        self._start_button_text.set("暂停")
+        self._append_runtime_message("主窗口检查通过，开始执行任务计划")
+
+    def _set_preview_segment_status(self, runtime_key: str, status: str) -> None:
+        if not runtime_key:
+            return
+        self._preview_status_by_runtime_key[runtime_key] = status
+        self._refresh_preview()
+
+    def _initialize_running_preview_snapshot(self, segments: list) -> None:
+        self._running_segments_snapshot = list(segments)
+        self._preview_status_by_runtime_key = {}
+        self._active_runtime_key = None
+
+        for index, segment in enumerate(self._running_segments_snapshot, start=1):
+            runtime_key = self._build_runtime_key(index, segment)
+            reason = segment_block_reason(segment)
+            self._preview_status_by_runtime_key[runtime_key] = "未接通" if reason else "未执行"
+
+        self._refresh_preview()
+
+    def _handle_segment_start(self, payload: dict[str, object]) -> None:
+        runtime_key = str(payload.get("runtime_key") or "")
+        display_name = str(payload.get("display_name") or "任务")
+        segment_type = str(payload.get("segment_type") or "")
+        self._active_runtime_key = runtime_key or self._active_runtime_key
+        self._set_preview_segment_status(runtime_key, "执行中")
+        self._status_text.set(f"运行中 - {display_name}")
+        if segment_type != "rest":
+            self._append_runtime_message(f"开始执行 {display_name}")
+
+    def _handle_segment_completed(self, payload: dict[str, object]) -> None:
+        runtime_key = str(payload.get("runtime_key") or "")
+        if self._active_runtime_key == runtime_key:
+            self._active_runtime_key = None
+        self._set_preview_segment_status(runtime_key, "已完成")
+
+    def _handle_segment_failed(self, payload: dict[str, object]) -> None:
+        runtime_key = str(payload.get("runtime_key") or self._active_runtime_key or "")
+        display_name = str(payload.get("display_name") or "任务")
+        error = str(payload.get("error") or "未知错误")
+        if runtime_key:
+            self._set_preview_segment_status(runtime_key, "失败")
+        self._status_text.set(f"运行失败：{error}")
+        self._append_runtime_message(f"{display_name} 失败：{error}")
+
+    def _handle_rest_start(self, payload: dict[str, object]) -> None:
+        runtime_key = str(payload.get("runtime_key") or "")
+        display_name = str(payload.get("display_name") or "静置")
+        duration_sec = int(payload.get("duration_sec") or 0)
+        self._active_runtime_key = runtime_key or self._active_runtime_key
+        self._set_preview_segment_status(runtime_key, "执行中")
+        self._status_text.set(f"运行中 - {display_name}")
+        if duration_sec > 0:
+            minutes = duration_sec // 60
+            if duration_sec % 60 == 0 and minutes > 0:
+                self._append_runtime_message(f"静置 {minutes} 分钟")
+            else:
+                self._append_runtime_message(f"静置 {self._format_rest_countdown(duration_sec)}")
+
+    def _handle_rest_tick(self, payload: dict[str, object]) -> None:
+        remaining_sec = int(payload.get("remaining_sec") or 0)
+        self._status_text.set(f"运行中 - 静置 {self._format_rest_countdown(remaining_sec)}")
+
+    def _handle_rest_completed(self, payload: dict[str, object]) -> None:
+        runtime_key = str(payload.get("runtime_key") or "")
+        if self._active_runtime_key == runtime_key:
+            self._active_runtime_key = None
+        self._set_preview_segment_status(runtime_key, "已完成")
+
+    def _handle_runtime_message(self, payload: dict[str, object]) -> None:
+        message = str(payload.get("message") or "").strip()
+        if message:
+            self._append_runtime_message(message)
+
+    def _handle_status_text(self, payload: dict[str, object]) -> None:
+        text = str(payload.get("text") or "").strip()
+        if text:
+            self._status_text.set(text)
+
+    def _handle_gui_event(self, payload: dict[str, object]) -> None:
+        event_type = str(payload.get("event_type") or "")
+        detail = payload.get("payload")
+        if not isinstance(detail, dict):
+            detail = {}
+
+        if event_type == "segment_start":
+            self._handle_segment_start(detail)
+        elif event_type == "segment_completed":
+            self._handle_segment_completed(detail)
+        elif event_type == "segment_failed":
+            self._handle_segment_failed(detail)
+        elif event_type == "rest_start":
+            self._handle_rest_start(detail)
+        elif event_type == "rest_tick":
+            self._handle_rest_tick(detail)
+        elif event_type == "rest_completed":
+            self._handle_rest_completed(detail)
+        elif event_type == "runtime_message":
+            self._handle_runtime_message(detail)
+        elif event_type == "status_text":
+            self._handle_status_text(detail)
+
     def _refresh_preview(self) -> None:
-        # 预览列表完全基于 controller 构造出的 segments，不在 GUI 层复制业务规则。
+        # 预览区优先显示运行期状态；未运行时只显示“可执行/未接通”。
         for item in self._preview_tree.get_children():
             self._preview_tree.delete(item)
 
         try:
-            segments = sort_enabled_segments(build_segments_from_gui_state(self.state))
+            segments = self._get_preview_segments()
         except Exception as exc:
-            self._preview_tree.insert("", "end", values=("", "参数待补全", str(exc)))
+            self._preview_tree.insert("", "end", values=("", "参数待补全", "未接通"))
             return
 
         if not segments:
@@ -606,16 +843,20 @@ class Chi660eGuiApp:
             return
 
         for index, segment in enumerate(segments, start=1):
-            reason = segment_block_reason(segment)
-            status = "可执行" if reason is None else f"未接通：{reason}"
+            if self._running_segments_snapshot:
+                runtime_key = self._build_runtime_key(index, segment)
+                reason = segment_block_reason(segment)
+                status = self._preview_status_by_runtime_key.get(
+                    runtime_key,
+                    "未接通" if reason else "未执行",
+                )
+            else:
+                reason = segment_block_reason(segment)
+                status = "可执行" if reason is None else "未接通"
             self._preview_tree.insert("", "end", values=(index, segment.display_name, status))
 
     def _append_runtime_log(self, text: str) -> None:
-        # 日志框只追加文本，保持只读；用户不应直接编辑运行记录。
-        self._runtime_text.configure(state="normal")
-        self._runtime_text.insert("end", f"{text}\n")
-        self._runtime_text.see("end")
-        self._runtime_text.configure(state="disabled")
+        self._append_runtime_message(text)
 
     def _drain_event_queue(self) -> None:
         while True:
@@ -625,7 +866,17 @@ class Chi660eGuiApp:
                 break
 
             if event_type == "log":
-                self._append_runtime_log(payload)
+                continue
+            elif event_type == "gui_event":
+                self._handle_gui_event(payload)
+            elif event_type == "launch_started":
+                self._status_text.set("启动中")
+            elif event_type == "launch_failed":
+                self._handle_launch_failed(payload if isinstance(payload, dict) else {})
+            elif event_type == "launch_cancelled":
+                self._handle_launch_cancelled()
+            elif event_type == "run_entered":
+                self._handle_run_entered()
             elif event_type == "status":
                 self._status_text.set(payload)
             elif event_type == "run_finished":
@@ -654,15 +905,22 @@ class Chi660eGuiApp:
 
     def _on_start_pause_clicked(self) -> None:
         # GUI 只负责发起“开始/暂停”请求，真正执行仍由后台 workflow 线程处理。
+        if self._launching:
+            if self._run_control is not None:
+                self._run_control.request_stop()
+                self._status_text.set("已请求取消启动")
+                self._append_runtime_message("已发送取消启动请求")
+            return
+
         if self._running:
             if self._run_control is not None:
                 self._run_control.request_stop()
                 self._status_text.set("已请求暂停，等待当前安全检查点停止。")
-                self._append_runtime_log("已发送暂停请求，等待流程在安全检查点停止。")
+                self._append_runtime_message("已发送暂停请求")
             return
 
         self._sync_state_from_vars()
-        segments = build_segments_from_gui_state(self.state)
+        segments = sort_enabled_segments(build_segments_from_gui_state(self.state))
         issues = validate_workflow_segments(segments)
         if issues:
             summary = "\n".join(f"- {item['display_name']}: {item['reason']}" for item in issues)
@@ -675,12 +933,20 @@ class Chi660eGuiApp:
             messagebox.showerror("参数错误", "请先填写存储路径。")
             return
 
+        blocking_window = self._check_blocking_child_windows_before_start()
+        if blocking_window is not None:
+            self._status_text.set("启动失败：请先关闭子窗口")
+            self._append_runtime_message(f"启动失败：检测到未关闭子窗口 {blocking_window}")
+            return
+
         save_gui_state(self.state)
-        self._running = True
+        self._launching = True
+        self._running = False
         self._run_control = RunControl()
-        self._start_button_text.set("暂停")
-        self._status_text.set("运行中")
-        self._append_runtime_log("开始执行 workflow。")
+        self._start_button_text.set("取消启动")
+        self._status_text.set("启动中")
+        self._initialize_running_preview_snapshot(segments)
+        self._append_runtime_message("开始检查 CHI660E 主窗口状态")
 
         self._worker_thread = threading.Thread(
             target=self._run_workflow_thread,
@@ -696,39 +962,78 @@ class Chi660eGuiApp:
         save_directory: str,
         run_control: RunControl,
     ) -> None:
-        init_logging()
-        app_logger = logging.getLogger(APP_NAME)
-        handler = _GuiQueueHandler(self._event_queue)
-        app_logger.addHandler(handler)
-        self._gui_log_handler = handler
-        self._event_queue.put(("status", "运行中"))
-
+        entered_run = False
+        terminal_event_sent = False
         try:
+            init_logging()
+            self._event_queue.put(("launch_started", {}))
+            if run_control.is_stop_requested():
+                self._event_queue.put(("launch_cancelled", {}))
+                terminal_event_sent = True
+                return
+
+            context = bootstrap_app()
+            context.run_control = run_control
+            context.gui_event_sink = lambda event_type, payload: self._event_queue.put(
+                ("gui_event", {"event_type": event_type, "payload": payload})
+            )
+
+            if run_control.is_stop_requested():
+                self._event_queue.put(("launch_cancelled", {}))
+                terminal_event_sent = True
+                return
+
+            self._event_queue.put(("run_entered", {}))
+            entered_run = True
             run_workflow_segments(
                 segments,
                 save_directory=save_directory,
+                context=context,
                 run_control=run_control,
             )
-        except RunStopRequested as exc:
-            self._event_queue.put(("run_finished", f"已暂停：{exc}"))
-        except Exception as exc:
-            self._event_queue.put(("run_finished", f"运行失败：{exc}"))
-        else:
             self._event_queue.put(("run_finished", "运行完成。"))
+            terminal_event_sent = True
+        except RunStopRequested:
+            if entered_run:
+                self._event_queue.put(("run_finished", "已暂停"))
+            else:
+                self._event_queue.put(("launch_cancelled", {}))
+            terminal_event_sent = True
+        except Exception as exc:
+            if entered_run:
+                self._event_queue.put(("run_finished", "运行失败"))
+            else:
+                self._event_queue.put(
+                    (
+                        "launch_failed",
+                        {"message": self._format_launch_error_message(exc)},
+                    )
+                )
+            terminal_event_sent = True
+        else:
+            pass
         finally:
-            app_logger.removeHandler(handler)
-            handler.close()
-            self._gui_log_handler = None
+            if not terminal_event_sent:
+                if entered_run:
+                    self._event_queue.put(("run_finished", "任务已终止"))
+                elif run_control.is_stop_requested():
+                    self._event_queue.put(("launch_cancelled", {}))
+                else:
+                    self._event_queue.put(
+                        (
+                            "launch_failed",
+                            {"message": "启动失败：后台线程未完成初始化"},
+                        )
+                    )
 
     def _finish_run(self, message: str) -> None:
-        self._running = False
-        self._run_control = None
-        self._start_button_text.set("开始")
+        self._reset_launch_and_run_state()
+        self._refresh_preview()
         self._status_text.set(message)
-        self._append_runtime_log(message)
+        self._append_runtime_message(message)
 
     def _on_close(self) -> None:
-        if self._running and self._run_control is not None:
+        if (self._launching or self._running) and self._run_control is not None:
             self._run_control.request_stop()
         save_gui_state(self.state)
         self.root.destroy()

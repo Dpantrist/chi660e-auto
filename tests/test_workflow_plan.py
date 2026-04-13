@@ -93,6 +93,56 @@ class WorkflowPlanTestCase(unittest.TestCase):
         self.assertTrue(segments)
         self.assertTrue(preview)
 
+    def test_cv_editable_scan_rate_value_is_used_in_segments(self) -> None:
+        state = build_default_gui_state()
+        state.enable_activation_cv = False
+        state.enable_eis_after_activation = False
+        state.enable_eis_after_cv = False
+        state.enable_gcd_series = False
+        state.enable_eis_after_gcd = False
+        state.enable_cv_series = True
+        state.cv_scan_rate_entry_values_mv[1] = "7"
+        state.cv_scan_rate_selected_indices = [1]
+
+        segments = build_segments_from_gui_state(state)
+        cv_segments = [segment for segment in segments if "scan_rate_mv" in segment.params]
+
+        self.assertEqual(len(cv_segments), 1)
+        self.assertEqual(cv_segments[0].params["scan_rate_mv"], 7.0)
+
+    def test_gcd_editable_density_value_is_used_in_segments(self) -> None:
+        state = build_default_gui_state()
+        state.enable_activation_cv = False
+        state.enable_eis_after_activation = False
+        state.enable_cv_series = False
+        state.enable_eis_after_cv = False
+        state.enable_eis_after_gcd = False
+        state.enable_gcd_series = True
+        state.gcd_current_density_entry_values_ma_cm2[5] = "2.5"
+        state.gcd_current_density_selected_indices = [5]
+
+        segments = build_segments_from_gui_state(state)
+        gcd_segments = [segment for segment in segments if "current_density_ma_cm2" in segment.params]
+
+        self.assertEqual(len(gcd_segments), 1)
+        self.assertEqual(gcd_segments[0].params["current_density_ma_cm2"], 2.5)
+
+    def test_cv_invalid_editable_scan_rate_raises_readable_error(self) -> None:
+        state = build_default_gui_state()
+        state.enable_activation_cv = False
+        state.enable_eis_after_activation = False
+        state.enable_eis_after_cv = False
+        state.enable_gcd_series = False
+        state.enable_eis_after_gcd = False
+        state.enable_cv_series = True
+        state.cv_scan_rate_entry_values_mv[0] = "abc"
+        state.cv_scan_rate_selected_indices = [0]
+
+        with self.assertRaises(ValueError) as context:
+            build_segments_from_gui_state(state)
+
+        self.assertIn("CV Scan Rate", str(context.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

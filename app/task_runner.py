@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 """Flow orchestration layer.
 
@@ -35,7 +35,7 @@ from app.gcd_config import (
     get_default_gcd_front_half_config,
 )
 from app.replay_manager import append_event, finalize_session
-from app.run_control import sleep_with_run_control
+from app.run_control import RunStopRequested, sleep_with_run_control
 from app.runtime_context import RuntimeContext
 from app.screenshot_manager import save_debug_capture, save_replay_capture
 from app.tasker_manager import bind_tasker, create_tasker
@@ -52,6 +52,7 @@ from app.window_preset import (
     enforce_window_preset_until_verified,
     verify_window_preset_applied,
 )
+from app.window_restore import restore_window, window_needs_restore, SW_RESTORE
 
 TECHNIQUE_WINDOW_KEYWORD = "Electrochemical Techniques"
 CV_PARAM_WINDOW_KEYWORD = "Cyclic Voltammetry Parameters"
@@ -71,7 +72,6 @@ CONTROL_MENU_OCP_OFFSET_Y = 275
 WM_GETTEXT = 0x000D
 WM_GETTEXTLENGTH = 0x000E
 BM_CLICK = 0x00F5
-SW_RESTORE = 9
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 
@@ -232,7 +232,7 @@ def _connect_window_with_preset_verification(
     last_error: Exception | None = None
 
     for window in matched_windows:
-        try:
+        def _attempt_connect_current_window():
             enforce_result = enforce_window_preset_until_verified(
                 window.hwnd,
                 preset_keyword,
@@ -252,7 +252,21 @@ def _connect_window_with_preset_verification(
                 )
 
             return window, controller
+
+        try:
+            if not _restore_window_if_needed(context, window.hwnd, "connect_window_with_preset_verification"):
+                last_error = Chi660eAutoError("Window restore failed before preset verification.")
+                continue
+            return _attempt_connect_current_window()
         except Exception as exc:
+            if _looks_like_restoreable_window_error(exc):
+                try:
+                    if not _restore_window_if_needed(context, window.hwnd, "connect_window_retry"):
+                        last_error = Chi660eAutoError("Window restore failed before retry verification.")
+                        continue
+                    return _attempt_connect_current_window()
+                except Exception as retry_exc:
+                    exc = retry_exc
             last_error = exc
             if context.replay_record is not None:
                 append_event(
@@ -281,6 +295,9 @@ def _repair_cached_session(context: RuntimeContext, session: WindowSession) -> b
             except Exception:
                 pass
         return _create_connected_controller(hwnd)
+
+    if not _restore_window_if_needed(context, session.hwnd, "repair_cached_session"):
+        return False
 
     enforce_result = enforce_window_preset_until_verified(
         session.hwnd,
@@ -325,6 +342,8 @@ def _session_still_usable(context: RuntimeContext, session: WindowSession) -> bo
         return False
     if not _session_exists_on_desktop(session):
         return False
+    if not _restore_window_if_needed(context, session.hwnd, "session_still_usable"):
+        return False
 
     verify_result = verify_window_preset_applied(
         session.hwnd,
@@ -351,6 +370,12 @@ def _ensure_context_window_ready_for_task(context: RuntimeContext) -> None:
         return
     if context.controller is None:
         raise Chi660eAutoError("Controller is not initialized.")
+    if not _restore_window_if_needed(
+        context,
+        context.linked_window.hwnd,
+        "ensure_context_window_ready_for_task",
+    ):
+        raise Chi660eAutoError("Window restore failed before task verification.")
 
     verify_result = verify_window_preset_applied(
         context.linked_window.hwnd,
@@ -433,6 +458,25 @@ def _enforce_min_action_gap(context: RuntimeContext, action_name: str) -> None:
 
 def _mark_action_completed(context: RuntimeContext) -> None:
     context.last_action_completed_at = time.monotonic()
+
+
+def _emit_gui_event(context: RuntimeContext, event_type: str, payload: dict[str, Any]) -> None:
+    sink = getattr(context, "gui_event_sink", None)
+    if sink is None:
+        return
+    sink(event_type, payload)
+
+
+def _emit_runtime_message(context: RuntimeContext, message: str) -> None:
+    _emit_gui_event(context, "runtime_message", {"message": message})
+
+
+def _format_gui_error_message(exc: Exception) -> str:
+    """压缩异常文本，避免把过长技术细节直接塞进 GUI。"""
+    message = str(exc).strip()
+    if not message:
+        return exc.__class__.__name__
+    return message.splitlines()[0][:120]
 
 
 def _raise_if_stop_requested(context: RuntimeContext, stage: str) -> None:
@@ -917,6 +961,7 @@ def _run_visual_action_expect_window_with_fallback(
             )
 
     if not spec.allow_pipeline_fallback:
+        _emit_runtime_message(context, f"界面操作失败：{spec.name}")
         if last_error is not None:
             raise last_error
         raise Chi660eAutoError(f"Visual action failed: {spec_name}")
@@ -937,15 +982,19 @@ def _run_visual_action_expect_window_with_fallback(
         },
         level="WARNING",
     )
-    return _post_task_expect_window_with_recovery(
-        context,
-        pipeline_fallback_entry,
-        spec.expected_window_keyword or replay_name,
-        replay_name,
-        max_attempts=max(1, spec.max_attempts),
-        initial_wait_timeout=spec.timeout_sec,
-        retry_wait_timeout=spec.retry_timeout_sec,
-    )
+    try:
+        return _post_task_expect_window_with_recovery(
+            context,
+            pipeline_fallback_entry,
+            spec.expected_window_keyword or replay_name,
+            replay_name,
+            max_attempts=max(1, spec.max_attempts),
+            initial_wait_timeout=spec.timeout_sec,
+            retry_wait_timeout=spec.retry_timeout_sec,
+        )
+    except Exception:
+        _emit_runtime_message(context, f"界面操作失败：{spec.name}")
+        raise
 
 
 def _wait_for_window(
@@ -1033,6 +1082,29 @@ def _window_rect_by_hwnd(hwnd: int) -> tuple[int, int, int, int]:
         int(rect.top),
         int(rect.right - rect.left),
         int(rect.bottom - rect.top),
+    )
+
+
+def _restore_window_if_needed(context: RuntimeContext, hwnd: int, reason: str) -> bool:
+    if not window_needs_restore(hwnd):
+        return True
+
+    _emit_runtime_message(context, "检测到窗口最小化，尝试恢复窗口")
+    restored = restore_window(hwnd, logger=context.logger, attempts=15)
+    if restored:
+        _emit_runtime_message(context, "窗口已恢复到前台")
+        return True
+
+    context.logger.warning("Window restore failed: hwnd=%s reason=%s", hwnd, reason)
+    _emit_runtime_message(context, "窗口恢复失败：窗口仍处于最小化或不可见状态")
+    return False
+
+
+def _looks_like_restoreable_window_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(
+        token in text
+        for token in ("0x0", "0×0", "0*0", "minimize", "minimized", "iconic", "capture", "rect")
     )
 
 
@@ -1150,7 +1222,7 @@ def _find_ocp_ok_button(ocp_window) -> dict[str, Any] | None:
     for child in children:
         if child["class_name"] != "Button":
             continue
-        if _normalize_ui_text(child["text"]) in {"ok", "确定"}:
+        if _normalize_ui_text(child["text"]) in {"ok", "纭畾"}:
             return child
     return None
 
@@ -1230,31 +1302,38 @@ def _read_open_circuit_potential_value(context: RuntimeContext, ocp_window) -> s
 
 
 def _read_and_close_open_circuit_potential(context: RuntimeContext) -> dict[str, str]:
-    context.logger.info("Open circuit potential read start.")
-    _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "ocp_main_initial")
-    _click_open_circuit_potential_from_control_menu(context)
-    _bind_context_to_window(
-        context,
-        OCP_WINDOW_KEYWORD,
-        "ocp_result_window",
-        timeout_sec=WINDOW_WAIT_TIMEOUT_SEC,
-        interval_sec=WINDOW_WAIT_INTERVAL_SEC,
-    )
-    if context.linked_window is None:
-        raise Chi660eAutoError("OCP result window was detected but runtime context was not bound.")
-    ocp_window = context.linked_window
+    try:
+        context.logger.info("Open circuit potential read start.")
+        _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "ocp_main_initial")
+        _click_open_circuit_potential_from_control_menu(context)
+        _bind_context_to_window(
+            context,
+            OCP_WINDOW_KEYWORD,
+            "ocp_result_window",
+            timeout_sec=WINDOW_WAIT_TIMEOUT_SEC,
+            interval_sec=WINDOW_WAIT_INTERVAL_SEC,
+        )
+        if context.linked_window is None:
+            raise Chi660eAutoError("OCP result window was detected but runtime context was not bound.")
+        ocp_window = context.linked_window
 
-    raw_text = _read_open_circuit_potential_value(context, ocp_window)
-    normalized_value = _normalize_ocp_for_init_e(raw_text)
-    context.logger.info("OCP raw: %s", raw_text)
-    context.logger.info("OCP normalized for Init E: raw=%s normalized=%s", raw_text, normalized_value)
+        raw_text = _read_open_circuit_potential_value(context, ocp_window)
+        normalized_value = _normalize_ocp_for_init_e(raw_text)
+        context.logger.info("OCP raw: %s", raw_text)
+        context.logger.info("OCP normalized for Init E: raw=%s normalized=%s", raw_text, normalized_value)
+        _emit_runtime_message(context, f"读取开路电压 {raw_text}")
 
-    _click_ocp_dialog_ok(context, ocp_window)
-    _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "ocp_main_final")
-    return {
-        "raw_text": raw_text,
-        "normalized_value": normalized_value,
-    }
+        _click_ocp_dialog_ok(context, ocp_window)
+        _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, "ocp_main_final")
+        return {
+            "raw_text": raw_text,
+            "normalized_value": normalized_value,
+        }
+    except RunStopRequested:
+        raise
+    except Exception as exc:
+        _emit_runtime_message(context, f"读取开路电压失败：{_format_gui_error_message(exc)}")
+        raise
 
 
 def _bind_context_to_window(
@@ -1264,67 +1343,80 @@ def _bind_context_to_window(
     timeout_sec: float | None = None,
     interval_sec: float | None = None,
 ) -> RuntimeContext:
-    preset_keyword = _canonical_window_keyword(keyword)
-    cached_session = _get_cached_session(context, preset_keyword)
-    if cached_session is not None:
-        if _session_still_usable(context, cached_session):
-            context.logger.info("Reusing cached window session: keyword=%s", preset_keyword)
-            _activate_session(context, preset_keyword)
+    try:
+        preset_keyword = _canonical_window_keyword(keyword)
+        cached_session = _get_cached_session(context, preset_keyword)
+        if cached_session is not None:
+            if _session_still_usable(context, cached_session):
+                context.logger.info("Reusing cached window session: keyword=%s", preset_keyword)
+                _activate_session(context, preset_keyword)
+                if context.replay_record is not None:
+                    append_event(
+                        context.replay_record,
+                        "window_session_reused",
+                        {
+                            "keyword": preset_keyword,
+                            "title": cached_session.linked_window.title,
+                        },
+                    )
+                _save_step_capture(context, capture_name)
+                return context
+            context.logger.info("Cached session invalid, fallback to rebind: keyword=%s", preset_keyword)
             if context.replay_record is not None:
                 append_event(
                     context.replay_record,
-                    "window_session_reused",
+                    "window_session_fallback_rebind",
                     {
                         "keyword": preset_keyword,
                         "title": cached_session.linked_window.title,
                     },
                 )
-            _save_step_capture(context, capture_name)
-            return context
-        context.logger.info("Cached session invalid, fallback to rebind: keyword=%s", preset_keyword)
+
+        link_result = _wait_for_window(
+            keyword,
+            timeout_sec=timeout_sec,
+            interval_sec=interval_sec,
+            context=context,
+        )
+        if not _restore_window_if_needed(
+            context,
+            link_result.selected_window.hwnd,
+            "bind_context_to_window",
+        ):
+            raise Chi660eAutoError("Window restore failed before binding.")
+
+        context.logger.info("Binding runtime context to window: %s", link_result.selected_window.title)
+        selected_window, controller = _connect_window_with_preset_verification(
+            context,
+            link_result.matched_windows,
+            preset_keyword,
+            keyword,
+        )
+        context.controller = controller
+
+        tasker = create_tasker()
+        bind_tasker(tasker, context.resource, controller)
+        _register_session(context, preset_keyword, selected_window, controller, tasker)
+        _activate_session(context, preset_keyword)
+
         if context.replay_record is not None:
             append_event(
                 context.replay_record,
-                "window_session_fallback_rebind",
+                "window_connected",
                 {
-                    "keyword": preset_keyword,
-                    "title": cached_session.linked_window.title,
+                    "keyword": keyword,
+                    "title": selected_window.title,
+                    "hwnd": selected_window.hwnd,
                 },
             )
 
-    link_result = _wait_for_window(
-        keyword,
-        timeout_sec=timeout_sec,
-        interval_sec=interval_sec,
-        context=context,
-    )
-    context.logger.info("Binding runtime context to window: %s", link_result.selected_window.title)
-    selected_window, controller = _connect_window_with_preset_verification(
-        context,
-        link_result.matched_windows,
-        preset_keyword,
-        keyword,
-    )
-    context.controller = controller
-
-    tasker = create_tasker()
-    bind_tasker(tasker, context.resource, controller)
-    _register_session(context, preset_keyword, selected_window, controller, tasker)
-    _activate_session(context, preset_keyword)
-
-    if context.replay_record is not None:
-        append_event(
-            context.replay_record,
-            "window_connected",
-            {
-                "keyword": keyword,
-                "title": selected_window.title,
-                "hwnd": selected_window.hwnd,
-            },
-        )
-
-    _save_step_capture(context, capture_name)
-    return context
+        _save_step_capture(context, capture_name)
+        return context
+    except RunStopRequested:
+        raise
+    except Exception as exc:
+        _emit_runtime_message(context, f"连接窗口失败：{_format_gui_error_message(exc)}")
+        raise
 
 
 def _confirm_technique_selected_after_click(context: RuntimeContext) -> bool:
@@ -1362,6 +1454,7 @@ def _confirm_technique_selected_after_click(context: RuntimeContext) -> bool:
 
 
 def _run_techniques_select_cv_and_confirm(context: RuntimeContext) -> None:
+    _emit_runtime_message(context, "选择 CV 方法")
     selected_result = _run_visual_action_once(context, "Techniques_SelectCV_Selected_Check")
     context.logger.info(
         "Technique initial selected check: matched=%s score=%.6f",
@@ -1454,6 +1547,7 @@ def _confirm_technique_eis_selected_after_click(context: RuntimeContext) -> bool
 
 
 def _run_techniques_select_eis_and_confirm(context: RuntimeContext) -> None:
+    _emit_runtime_message(context, "选择 EIS 方法")
     selected_result = _run_visual_action_once(context, "Techniques_SelectEIS_Selected_Check")
     context.logger.info(
         "Technique initial EIS selected check: matched=%s score=%.6f",
@@ -1546,6 +1640,7 @@ def _confirm_technique_gcd_selected_after_click(context: RuntimeContext) -> bool
 
 
 def _run_techniques_select_gcd_and_confirm(context: RuntimeContext) -> None:
+    _emit_runtime_message(context, "选择 GCD 方法")
     selected_result = _run_visual_action_once(context, "Techniques_SelectGCD_Selected_Check")
     context.logger.info(
         "Technique initial GCD selected check: matched=%s score=%.6f",
@@ -1664,6 +1759,7 @@ def _bind_next_window_or_open_from_main(
                         "source": "direct_popup",
                     },
                 )
+            _emit_runtime_message(context, f"打开 {next_window_label}")
             return bound_context
         except Exception as exc:
             fallback_reason = "direct_bind_failed"
@@ -1758,12 +1854,14 @@ def _bind_next_window_or_open_from_main(
                 )
             _bind_context_to_window(context, MAIN_WINDOW_TITLE_CANDIDATES, main_rebind_replay_name)
 
-    return _run_visual_action_expect_window_with_fallback(
+    bound_context = _run_visual_action_expect_window_with_fallback(
         context,
         main_click_spec_name,
         main_click_replay_name,
         fallback_entry,
     )
+    _emit_runtime_message(context, f"打开 {next_window_label}")
+    return bound_context
 
 
 def _build_node_override(node_name: str, **fields: Any) -> dict[str, dict[str, Any]]:
@@ -1907,7 +2005,7 @@ def _run_text_input_field(
         raise Chi660eAutoError(f"Visual focus click point is missing for {focus_name}.")
 
     context.logger.info("Input focus located: name=%s click_point=%s", focus_name, focus_result.click_point)
-    # 仅在指定字段上增加额外清理轮次，默认仍保持现有一轮行为。
+    # 仅在指定字段上增加额外清理轮次，默认仍保持现有单轮清理。
     for _ in range(max(1, cleanup_passes)):
         _double_click_focused_input(context, focus_name, focus_result.click_point)
         _delete_immediately_after_double_click(context, focus_name)
@@ -1982,22 +2080,80 @@ def _select_cv_sensitivity_dropdown_value(
         )
 
 
+def _select_cv_initial_scan_polarity_dropdown_value(
+    context: RuntimeContext,
+    polarity_value: str,
+) -> None:
+    focus_result = _run_visual_action_click(context, "CV_FocusInitialScanPolarity")
+    if focus_result.click_point is None:
+        raise Chi660eAutoError("Initial Scan Polarity dropdown click point is missing.")
+
+    dropdown_click_point = focus_result.click_point
+    context.logger.info(
+        "CV initial scan polarity dropdown opened: click_point=%s",
+        dropdown_click_point,
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "cv_initial_scan_polarity_dropdown_opened",
+            {
+                "click_point": dropdown_click_point,
+            },
+        )
+
+    option_offset = _get_dropdown_option_offset("CV_FocusInitialScanPolarity", polarity_value)
+    option_click_point = (
+        int(dropdown_click_point[0] + option_offset[0]),
+        int(dropdown_click_point[1] + option_offset[1]),
+    )
+
+    _enforce_min_action_gap(context, f"click:CV_InitialScanPolarityOption:{polarity_value}")
+    click_point(
+        context.controller,
+        option_click_point[0],
+        option_click_point[1],
+        option_click_point,
+    )
+    _mark_action_completed(context)
+    context.logger.info(
+        "CV initial scan polarity option click: value=%s click_point=%s",
+        polarity_value,
+        option_click_point,
+    )
+    if context.replay_record is not None:
+        append_event(
+            context.replay_record,
+            "cv_initial_scan_polarity_option_click",
+            {
+                "value": polarity_value,
+                "click_point": option_click_point,
+                "offset": option_offset,
+            },
+        )
+
+
 def _run_cv_front_half_visual_form_once(
     context: RuntimeContext,
     config: CVFrontHalfConfig,
 ) -> None:
+    _emit_runtime_message(context, f"输入 High E (V) {config.high_potential}")
     _run_cv_input_field(
         context,
         "CV_FocusHighPotential",
         "CV_InputHighPotential_Apply",
         config.high_potential,
     )
+    _emit_runtime_message(context, "设置 Initial Scan Polarity Positive")
+    _select_cv_initial_scan_polarity_dropdown_value(context, "Positive")
+    _emit_runtime_message(context, f"输入 Scan Rate (V/s) {config.scan_rate}")
     _run_cv_input_field(
         context,
         "CV_FocusScanRate",
         "CV_InputScanRate_Apply",
         config.scan_rate,
     )
+    _emit_runtime_message(context, f"输入 Sweep Segments {config.sweep_segments}")
     _run_cv_input_field(
         context,
         "CV_FocusSweepSegments",
@@ -2006,6 +2162,7 @@ def _run_cv_front_half_visual_form_once(
     )
     _select_cv_sensitivity_dropdown_value(context, config.sensitivity)
 
+    _emit_runtime_message(context, "点击参数窗口 OK")
     ok_result = _run_visual_action_click(context, "CV_ClickOK")
     _append_visual_action_event(
         context,
@@ -2028,6 +2185,7 @@ def _run_eis_front_half_visual_form_once(
     config: EISFrontHalfConfig,
 ) -> None:
     context.logger.info("EIS init E input start/value=%s", config.init_potential_v)
+    _emit_runtime_message(context, f"输入 Init E (V) {config.init_potential_v}")
     _run_text_input_field(
         context,
         "EIS_FocusInitPotential",
@@ -2035,6 +2193,7 @@ def _run_eis_front_half_visual_form_once(
         config.init_potential_v,
     )
     context.logger.info("EIS high frequency input start/value=%s", config.high_frequency_hz)
+    _emit_runtime_message(context, f"输入 High Frequency (Hz) {config.high_frequency_hz}")
     _run_text_input_field(
         context,
         "EIS_FocusHighFrequency",
@@ -2043,6 +2202,7 @@ def _run_eis_front_half_visual_form_once(
         cleanup_passes=2,
     )
     context.logger.info("EIS low frequency input start/value=%s", config.low_frequency_hz)
+    _emit_runtime_message(context, f"输入 Low Frequency (Hz) {config.low_frequency_hz}")
     _run_text_input_field(
         context,
         "EIS_FocusLowFrequency",
@@ -2050,6 +2210,7 @@ def _run_eis_front_half_visual_form_once(
         config.low_frequency_hz,
     )
 
+    _emit_runtime_message(context, "点击参数窗口 OK")
     ok_result = _run_visual_action_click(context, "EIS_ClickOK")
     _append_visual_action_event(
         context,
@@ -2075,6 +2236,7 @@ def _run_gcd_front_half_visual_form_once(
         "GCD cathodic current input start/value=%s",
         run_values["cathodic_current_a_text"],
     )
+    _emit_runtime_message(context, f"输入 Cathodic Current (A) {run_values['cathodic_current_a_text']}")
     _run_text_input_field(
         context,
         "GCD_FocusCathodicCurrent",
@@ -2085,6 +2247,7 @@ def _run_gcd_front_half_visual_form_once(
         "GCD anodic current input start/value=%s",
         run_values["anodic_current_a_text"],
     )
+    _emit_runtime_message(context, f"输入 Anodic Current (A) {run_values['anodic_current_a_text']}")
     _run_text_input_field(
         context,
         "GCD_FocusAnodicCurrent",
@@ -2095,6 +2258,7 @@ def _run_gcd_front_half_visual_form_once(
         "GCD high E limit input start/value=%s",
         run_values["high_e_limit_v_text"],
     )
+    _emit_runtime_message(context, f"输入 High E limit (V) {run_values['high_e_limit_v_text']}")
     _run_text_input_field(
         context,
         "GCD_FocusHighELimit",
@@ -2105,6 +2269,7 @@ def _run_gcd_front_half_visual_form_once(
         "GCD low E limit input start/value=%s",
         run_values["low_e_limit_v_text"],
     )
+    _emit_runtime_message(context, f"输入 Low E limit (V) {run_values['low_e_limit_v_text']}")
     _run_text_input_field(
         context,
         "GCD_FocusLowELimit",
@@ -2115,6 +2280,7 @@ def _run_gcd_front_half_visual_form_once(
         "GCD data storage interval input start/value=%s",
         run_values["data_storage_interval_text"],
     )
+    _emit_runtime_message(context, f"输入 Data Storage Intvl (sec) {run_values['data_storage_interval_text']}")
     _run_text_input_field(
         context,
         "GCD_FocusDataStorageIntvl",
@@ -2125,6 +2291,7 @@ def _run_gcd_front_half_visual_form_once(
         "GCD number of segments input start/value=%s",
         run_values["number_of_segments_text"],
     )
+    _emit_runtime_message(context, f"输入 Number of Segments {run_values['number_of_segments_text']}")
     _run_text_input_field(
         context,
         "GCD_FocusNumberOfSegments",
@@ -2132,6 +2299,7 @@ def _run_gcd_front_half_visual_form_once(
         run_values["number_of_segments_text"],
     )
 
+    _emit_runtime_message(context, "点击参数窗口 OK")
     ok_result = _run_visual_action_click(context, "GCD_ClickOK")
     _append_visual_action_event(
         context,
@@ -2231,6 +2399,7 @@ def run_cv_front_half_on_context(
         )
 
     _raise_if_stop_requested(context, "cv_front_half_before_technique")
+    _emit_runtime_message(context, "点击 Techniques 按钮")
     _run_visual_action_expect_window_with_fallback(
         context,
         "Main_ClickTechnique",
@@ -2281,6 +2450,7 @@ def run_eis_front_half_on_context(
         )
 
     _raise_if_stop_requested(context, "eis_front_half_before_technique")
+    _emit_runtime_message(context, "点击 Techniques 按钮")
     _run_visual_action_expect_window_with_fallback(
         context,
         "Main_ClickTechnique",
@@ -2332,6 +2502,7 @@ def run_gcd_front_half_on_context(
         )
 
     _raise_if_stop_requested(context, "gcd_front_half_before_technique")
+    _emit_runtime_message(context, "点击 Techniques 按钮")
     _run_visual_action_expect_window_with_fallback(
         context,
         "Main_ClickTechnique",

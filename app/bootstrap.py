@@ -12,7 +12,7 @@ from app.constants import (
 from app.controller_manager import capture_once, connect_controller, create_controller
 from app.controller_manager import get_cached_image_safe
 from app.dto import AppStatus, WindowInfo, WindowSession
-from app.errors import Chi660eAutoError
+from app.errors import Chi660eAutoError, ControllerInitError
 from app.logging_utils import get_logger, init_logging
 from app.paths import BASE_DIR, LOG_FILE, MAA_LOG_FILE, RESOURCE_DIR, ensure_project_dirs
 from app.replay_manager import append_event, create_replay_session, finalize_session
@@ -20,6 +20,7 @@ from app.resource_loader import create_resource, load_resource_bundle
 from app.runtime_context import RuntimeContext
 from app.screenshot_manager import save_debug_capture, save_replay_capture
 from app.tasker_manager import bind_tasker, create_tasker
+from app.window_restore import restore_window, window_needs_restore
 from app.window_linker import find_target_window, list_desktop_windows
 from app.window_preset import (
     enforce_window_preset_until_verified,
@@ -34,6 +35,16 @@ _BOOTSTRAP_MAIN_WINDOW_ERROR_SNIPPETS = (
     "cannot find any method to screencap",
     "Initial screencap validation failed.",
     "Failed to create Win32Controller",
+)
+_BLOCKING_CHILD_WINDOW_KEYWORDS = (
+    "Electrochemical Techniques",
+    "Cyclic Voltammetry Parameters",
+    "A.C. Impedance Parameters",
+    "Chronopotentiometry Parameters",
+    "Open Circuit Potential",
+    "另存为",
+    "Confirm Save As",
+    "Do you want to replace it",
 )
 
 
@@ -130,6 +141,50 @@ def _create_connected_controller(hwnd: int):
     return controller
 
 
+def _looks_like_restoreable_main_window_error(exc: Exception) -> bool:
+    text = str(exc)
+    return any(snippet in text for snippet in _BOOTSTRAP_MAIN_WINDOW_ERROR_SNIPPETS)
+
+
+def find_blocking_child_windows(windows: list[WindowInfo] | None = None) -> list[str]:
+    matched_titles: list[str] = []
+    for window in windows or list_desktop_windows():
+        title = (window.title or "").strip()
+        if not title:
+            continue
+        lowered_title = title.lower()
+        if any(keyword.lower() in lowered_title for keyword in _BLOCKING_CHILD_WINDOW_KEYWORDS):
+            if title not in matched_titles:
+                matched_titles.append(title)
+    return matched_titles
+
+
+def _preset_verify_looks_like_child_window_block(enforce_result: dict) -> bool:
+    details = enforce_result.get("verify_details") or {}
+    return (
+        enforce_result.get("preset_exists")
+        and not enforce_result.get("verified")
+        and bool(details.get("client_ok"))
+        and bool(details.get("capture_ok"))
+        and bool(details.get("dpi_ok"))
+        and details.get("style_ok") is False
+    )
+
+
+def _create_connected_controller_with_restore_retry(context: RuntimeContext, hwnd: int):
+    try:
+        return _create_connected_controller(hwnd)
+    except Exception as exc:
+        if not _looks_like_restoreable_main_window_error(exc):
+            raise
+        if not restore_window(hwnd, logger=context.logger, attempts=10):
+            raise ControllerInitError(
+                "Controller connection failed after main window restore retry."
+            ) from exc
+        context.logger.warning("Bootstrap main window restored, retry controller connect")
+        return _create_connected_controller(hwnd)
+
+
 def _record_preset_history(context: RuntimeContext, title: str, history: list[dict]) -> None:
     for item in history:
         event_name = item.get("event")
@@ -148,10 +203,23 @@ def _connect_main_window_candidates(context: RuntimeContext, link_result):
 
     for window in link_result.matched_windows:
         try:
+            if window_needs_restore(window.hwnd):
+                context.logger.info("Bootstrap detected minimized main window, restoring...")
+                if not restore_window(window.hwnd, logger=context.logger, attempts=15):
+                    last_error = ControllerInitError(
+                        "Main window restore failed before controller connect."
+                    )
+                    context.logger.warning(
+                        "Bootstrap main window restore failed before controller connect: hwnd=%s title=%r",
+                        window.hwnd,
+                        window.title,
+                    )
+                    continue
+
             enforce_result = enforce_window_preset_until_verified(
                 window.hwnd,
                 WINDOW_KEYWORD,
-                _create_connected_controller,
+                lambda hwnd: _create_connected_controller_with_restore_retry(context, hwnd),
                 logger=context.logger,
                 retries=WINDOW_PRESET_VERIFY_RETRIES,
             )
@@ -159,9 +227,19 @@ def _connect_main_window_candidates(context: RuntimeContext, link_result):
 
             controller = enforce_result.get("controller")
             if controller is None:
-                controller = _create_connected_controller(window.hwnd)
+                controller = _create_connected_controller_with_restore_retry(context, window.hwnd)
 
             if enforce_result.get("preset_exists") and not enforce_result.get("verified"):
+                if _preset_verify_looks_like_child_window_block(enforce_result):
+                    blocking_windows = find_blocking_child_windows()
+                    if blocking_windows:
+                        context.logger.warning(
+                            "Bootstrap preset mismatch is likely caused by blocking child window: %s",
+                            blocking_windows[0],
+                        )
+                        raise Chi660eAutoError(
+                            f"CHI660E 主界面存在未关闭子窗口（{blocking_windows[0]}），请先关闭后重试。"
+                        )
                 raise Chi660eAutoError(
                     f"Window preset verification failed for keyword {WINDOW_KEYWORD!r}."
                 )

@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.run_cv_front_half:
         return _run_with_handled_errors(run_cv_front_half)
 
-    bootstrap_main()
+    launch_workflow_gui()
     return 0
 
 
