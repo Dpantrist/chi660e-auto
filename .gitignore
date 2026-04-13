@@ -209,19 +209,23 @@ __marimo__/
 # My configurations:
 *.zip
 
-# PyInstaller
-build/
-dist/
-*.spec
-
-# Python cache
 __pycache__/
 *.py[cod]
+*.log
 
-# 本项目运行产物（按需）
+build/
+dist/
+
 logs/
 debug/
 replay/
 
-#test
-tests/
+config/gui_state.json
+
+.idea/
+.vscode/
+.pytest_cache/
+
+# 如果 tests/test_data 只是本地测试输出目录，再打开这一条
+tests/test_data/
+
