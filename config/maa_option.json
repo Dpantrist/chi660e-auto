@@ -1,7 +1,7 @@
 {
   "logging": true,
   "save_draw": false,
-  "stdout_level": 4,
+  "stdout_level": 0,
   "save_on_error": true,
   "draw_quality": 85
 }

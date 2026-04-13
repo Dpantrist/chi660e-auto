@@ -1,4 +1,8 @@
 WINDOW_KEYWORD = "CHI660E Electrochemical Workstation"
+MAIN_WINDOW_TITLE_CANDIDATES = [
+    "CHI660E Electrochemical Workstation",
+    "CH Instruments Electrochemical Software",
+]
 
 DEFAULT_SCREENCAP_METHOD = "GDI"
 DEFAULT_INPUT_METHOD = "Seize"

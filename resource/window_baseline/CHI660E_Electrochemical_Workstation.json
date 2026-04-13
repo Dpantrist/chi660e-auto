@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-03-27T15:52:45+0800",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "python_version": "3.10.20",
+  "hwnd": 7408612,
+  "window_title": "CHI660E Electrochemical Workstation - [Untitled]",
+  "window_class": "Afx:00930000:8:00010003:00000000:287D096D",
+  "window_rect": {
+    "left": 130,
+    "top": 130,
+    "width": 1440,
+    "height": 753
+  },
+  "client_rect": {
+    "width": 1424,
+    "height": 714
+  },
+  "extended_frame_bounds": {
+    "left": 137,
+    "top": 130,
+    "width": 1426,
+    "height": 746
+  },
+  "window_state": {
+    "maximized": false,
+    "minimized": false,
+    "visible": true
+  },
+  "window_style": {
+    "style_int": 349143040,
+    "style_hex": "0x14cf8000",
+    "exstyle_int": 272,
+    "exstyle_hex": "0x110"
+  },
+  "window_dpi": 96,
+  "capture": {
+    "screencap_method": "GDI",
+    "image_shape": [
+      720,
+      1436,
+      3
+    ],
+    "resolution": [
+      1424,
+      714
+    ]
+  },
+  "runtime_snapshot_saved_to": "D:\\MaaFW\\Code\\cv-test\\debug\\window_baseline\\CHI660E_Electrochemical_Workstation.json"
+}

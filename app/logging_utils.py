@@ -26,15 +26,10 @@ def init_logging(log_file: Path = LOG_FILE) -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
-
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)
 
-    logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
     _LOGGING_INITIALIZED = True

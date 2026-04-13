@@ -1,1 +1,17 @@
-{}
+{
+  "CV_InputHighPotential_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "CV_InputScanRate_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "CV_InputSweepSegments_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  }
+}

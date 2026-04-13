@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from app.errors import ResourceLoadError
-from app.paths import DEFAULT_PIPELINE_FILE, RESOURCE_DEFAULT_PIPELINE_FILE, RESOURCE_DIR
+from app.paths import RESOURCE_DEFAULT_PIPELINE_FILE, RESOURCE_DIR
 
 
 def _import_resource_type():
@@ -16,17 +15,6 @@ def _import_resource_type():
             "for this machine before running the project."
         ) from exc
     return Resource
-
-
-def _sync_default_pipeline() -> Path:
-    if not DEFAULT_PIPELINE_FILE.exists():
-        raise ResourceLoadError(
-            f"Required default pipeline file is missing: {DEFAULT_PIPELINE_FILE}"
-        )
-
-    RESOURCE_DEFAULT_PIPELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(DEFAULT_PIPELINE_FILE, RESOURCE_DEFAULT_PIPELINE_FILE)
-    return RESOURCE_DEFAULT_PIPELINE_FILE
 
 
 def create_resource():
@@ -41,8 +29,10 @@ def load_resource_bundle(resource, resource_dir: Path = RESOURCE_DIR) -> Path:
     if not resource_dir.exists():
         raise ResourceLoadError(f"Resource directory does not exist: {resource_dir}")
 
-    # TODO: support layered bundle composition when the business pipeline layer is introduced.
-    bundle_default_pipeline = _sync_default_pipeline()
+    if not RESOURCE_DEFAULT_PIPELINE_FILE.exists():
+        raise ResourceLoadError(
+            f"Missing resource root default pipeline file: {RESOURCE_DEFAULT_PIPELINE_FILE}"
+        )
 
     try:
         job = resource.post_bundle(str(resource_dir)).wait()
@@ -54,4 +44,4 @@ def load_resource_bundle(resource, resource_dir: Path = RESOURCE_DIR) -> Path:
     if not getattr(job, "succeeded", False):
         raise ResourceLoadError(f"Failed to load resource bundle from: {resource_dir}")
 
-    return bundle_default_pipeline
+    return RESOURCE_DEFAULT_PIPELINE_FILE
