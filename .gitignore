@@ -209,7 +209,6 @@ __marimo__/
 # My configurations:
 *.zip
 
-<<<<<<< HEAD
 __pycache__/
 *.py[cod]
 *.log
@@ -230,19 +229,3 @@ config/gui_state.json
 # 如果 tests/test_data 只是本地测试输出目录，再打开这一条
 tests/test_data/
 
-=======
-# PyInstaller
-build/
-dist/
-*.spec
-
-# Python cache
-__pycache__/
-*.py[cod]
-app/__pycache__/
-
-# 本项目运行产物（按需）
-logs/
-debug/
-replay/
->>>>>>> dev
