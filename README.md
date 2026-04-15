@@ -31,11 +31,11 @@ pip install -r requirements.txt
 
 ### 1. 下载项目
 
-克隆或下载本仓库，进入 `Code/project` 目录。
+克隆或下载本仓库，进入存储目录。
 
 ### 2. 安装 Python 依赖
 
-在 `Code/project` 目录下执行：
+在根目录下执行：
 
 ```bash
 pip install -r requirements.txt
@@ -54,30 +54,28 @@ pip install -r requirements.txt
 推荐最简单的放置方式：
 
 - 把 `bin` 文件夹复制或移动到：
-  - `Code/project/maa_bin`
+  - `maa_bin`
 
 也就是最终结构建议为：
 
 ```text
-Code/
-└─ project/
-   ├─ app/
-   ├─ resource/
-   ├─ maa_bin/
-   ├─ chi660e_auto.py
-   └─ README.md
+app/
+resource/
+maa_bin/
+chi660e_auto.py
+README.md
 ```
 
 程序会优先尝试以下位置：
 
 - 环境变量 `MAA_BIN_DIR` 指向的目录
-- `Code/project/maa_bin`
-- 项目上一级目录下的 `maa_bin`
+- 仓库根目录下的 `maa_bin`
+- 仓库上一级目录下的 `maa_bin`
 - 同级或上级的 `MAA-win-*/bin`
 
 正式使用时，最稳妥的做法仍然是直接放到：
 
-- `Code/project/maa_bin`
+- `maa_bin`
 
 ### 5. 检查资源目录
 
@@ -93,7 +91,7 @@ Code/
 
 ### 方式一：源码启动
 
-进入 `Code/project` 目录后执行：
+进入仓库根目录后执行：
 
 ```bash
 python chi660e_auto.py
