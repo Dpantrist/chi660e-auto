@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from app.bootstrap import bootstrap_app, find_blocking_child_windows
-from app.constants import APP_NAME
+from app.constants import APP_NAME, APP_VERSION
 from app.gui_controller import build_segments_from_gui_state
 from app.gui_models import (
     CV_SCAN_RATE_OPTIONS_MV,
@@ -130,7 +130,7 @@ class Chi660eGuiApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _configure_root(self) -> None:
-        self.root.title("CHI660E 自动化 - ver 1.0")
+        self.root.title(f"CHI660E 自动化 - ver {APP_VERSION}")
         self.root.geometry(WINDOW_GEOMETRY)
         self.root.minsize(*WINDOW_MINSIZE)
         self.root.configure(bg="#eef1f5")

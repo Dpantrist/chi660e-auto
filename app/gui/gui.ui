@@ -2,7 +2,7 @@
 <interface version="1.3">
   <object class="tk.Toplevel" id="toplevel1">
     <property name="geometry">690x471</property>
-    <property name="title" translatable="yes">CHI660E 自动化 - ver 1.0</property>
+    <property name="title" translatable="yes">CHI660E 自动化 - ver 1.1</property>
     <property name="background">#eef1f5</property>
     <containerlayout manager="grid">
       <property type="col" id="0" name="weight">1</property>

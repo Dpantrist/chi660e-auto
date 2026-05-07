@@ -8,6 +8,8 @@ DEFAULT_SCREENCAP_METHOD = "GDI"
 DEFAULT_INPUT_METHOD = "Seize"
 
 APP_NAME = "chi660e_auto"
+# 版本号规则：主版本代表基础框架，次版本代表功能添加和问题修复。
+APP_VERSION = "1.1"
 
 DIR_APP = "app"
 DIR_RESOURCE = "resource"
