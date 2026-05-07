@@ -180,6 +180,7 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
             continue
 
         if bucket == "cv_series" and state.enable_cv_series:
+            repeat_count = _parse_positive_int(state.cv_repeat_count, "CV 循环次数")
             for scan_rate_mv in _resolve_selected_cv_scan_rates_mv(state):
                 segments.append(
                     build_cv_series_item_segment(
@@ -188,6 +189,7 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
                         high_potential=state.cv_high_e_v.strip(),
                         sweep_segments=state.cv_sweep_segments.strip(),
                         sensitivity=state.cv_sensitivity.strip(),
+                        repeat_count=repeat_count,
                     )
                 )
                 order += 1

@@ -123,6 +123,7 @@ def build_cv_series_item_segment(
     high_potential: str = "0.8",
     sweep_segments: str = "4",
     sensitivity: str = "1.e-003",
+    repeat_count: int = 1,
 ) -> WorkflowSegment:
     return WorkflowSegment(
         segment_id=f"cv_{scan_rate_mv}",
@@ -135,6 +136,7 @@ def build_cv_series_item_segment(
             "high_potential": str(high_potential),
             "sweep_segments": str(sweep_segments),
             "sensitivity": str(sensitivity),
+            "repeat_count": int(repeat_count),
         },
     )
 

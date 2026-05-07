@@ -37,7 +37,7 @@ TASK_LABELS = {
 
 # GUI 视觉布局主参数：
 # 这里只定义窗口尺寸、三列宽度和局部留白，后续若需要微调界面观感，优先修改这里。
-WINDOW_GEOMETRY = "710x480"
+WINDOW_GEOMETRY = "710x500"
 WINDOW_MINSIZE = (685, 480)
 NOTEBOOK_PADX = 2
 NOTEBOOK_PADY = 2
@@ -176,6 +176,7 @@ class Chi660eGuiApp:
             "eis_after_activation_avg_cycles_0p01_to_0p1hz",
             "cv_high_e_v",
             "cv_sweep_segments",
+            "cv_repeat_count",
             "cv_sensitivity",
             "eis_after_cv_rest_minutes",
             "eis_after_cv_high_frequency_hz",
@@ -529,6 +530,7 @@ class Chi660eGuiApp:
             value_vars=self._cv_rate_value_vars,
         )
         self._add_entry_row(frame, 3, "Sweep Segments", "cv_sweep_segments")
+        self._add_entry_row(frame, 4, "循环次数", "cv_repeat_count")
         return frame
 
     def _build_gcd_page(self, parent: ttk.Frame) -> ttk.Frame:

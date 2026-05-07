@@ -190,7 +190,7 @@ def _run_segment(
             f"Segment is modeled but not runnable yet: {segment.display_name} ({segment.segment_type.value})"
         )
 
-    if segment.segment_type in {WorkflowSegmentType.ACTIVATION_CV, WorkflowSegmentType.CV_SERIES_ITEM}:
+    if segment.segment_type == WorkflowSegmentType.ACTIVATION_CV:
         cv_config = build_cv_front_half_config_for_segment(segment)
         output_name = build_output_filename_for_segment(segment)
         if output_name is None:
@@ -213,6 +213,101 @@ def _run_segment(
                 "run_poll_count": post_run_result["run_finish"]["poll_count"],
             },
         )
+        return
+
+    if segment.segment_type == WorkflowSegmentType.CV_SERIES_ITEM:
+        cv_config = build_cv_front_half_config_for_segment(segment)
+        output_name = build_output_filename_for_segment(segment)
+        if output_name is None:
+            raise RuntimeError(f"Missing output filename for segment {segment.segment_id!r}.")
+        repeat_count = int(segment.params.get("repeat_count", 1))
+        if repeat_count < 1:
+            raise Chi660eAutoError(f"CV repeat_count must be >= 1: {repeat_count}")
+
+        scan_rate_mv = segment.params.get("scan_rate_mv")
+        context.logger.info(
+            "Workflow CV run values: scan_rate_mv=%s repeat_count=%s",
+            scan_rate_mv,
+            repeat_count,
+        )
+
+        for repeat_index in range(1, repeat_count + 1):
+            repeat_output_name = (
+                output_name if repeat_count == 1 else _build_repeat_output_name(output_name, repeat_index)
+            )
+            run_front_half = repeat_index == 1
+            context.logger.info(
+                "Workflow CV repeat start: scan_rate_mv=%s repeat_index=%s repeat_count=%s file_name=%s run_front_half=%s",
+                scan_rate_mv,
+                repeat_index,
+                repeat_count,
+                repeat_output_name,
+                run_front_half,
+            )
+            _append_workflow_event(
+                context,
+                "workflow_cv_repeat_start",
+                {
+                    "segment_id": segment.segment_id,
+                    "display_name": segment.display_name,
+                    "scan_rate_mv": scan_rate_mv,
+                    "repeat_index": repeat_index,
+                    "repeat_count": repeat_count,
+                    "file_name": repeat_output_name,
+                    "run_front_half": run_front_half,
+                },
+            )
+
+            if run_front_half:
+                run_cv_front_half_on_context(context, cv_config)
+                _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
+            else:
+                context.logger.info(
+                    "CV repeat skip front-half: scan_rate_mv=%s repeat=%s/%s",
+                    scan_rate_mv,
+                    repeat_index,
+                    repeat_count,
+                )
+                _append_workflow_event(
+                    context,
+                    "workflow_cv_repeat_front_half_skipped",
+                    {
+                        "segment_id": segment.segment_id,
+                        "display_name": segment.display_name,
+                        "scan_rate_mv": scan_rate_mv,
+                        "repeat_index": repeat_index,
+                        "repeat_count": repeat_count,
+                        "file_name": repeat_output_name,
+                    },
+                )
+                _raise_if_stop_requested(context, f"segment_skip_front_half:{segment.display_name}")
+
+            post_run_result = run_post_run_public_flow(
+                context,
+                save_directory=save_directory,
+                file_name=repeat_output_name,
+            )
+            _append_workflow_event(
+                context,
+                "workflow_segment_saved",
+                {
+                    "segment_id": segment.segment_id,
+                    "display_name": segment.display_name,
+                    "scan_rate_mv": scan_rate_mv,
+                    "repeat_index": repeat_index,
+                    "repeat_count": repeat_count,
+                    "file_name": repeat_output_name,
+                    "file_path": post_run_result["save"]["file_path"],
+                    "run_poll_count": post_run_result["run_finish"]["poll_count"],
+                },
+            )
+            context.logger.info(
+                "Workflow CV repeat completed: scan_rate_mv=%s repeat_index=%s repeat_count=%s file_name=%s",
+                scan_rate_mv,
+                repeat_index,
+                repeat_count,
+                repeat_output_name,
+            )
         return
 
     if segment.segment_type in {

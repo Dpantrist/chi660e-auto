@@ -132,6 +132,7 @@ class WorkflowGuiState:
         default_factory=lambda: list(range(len(CV_SCAN_RATE_OPTIONS_MV)))
     )
     cv_sweep_segments: str = "4"
+    cv_repeat_count: str = "1"
     cv_sensitivity: str = "1.e-003"
 
     eis_after_cv_rest_minutes: str = "10"
