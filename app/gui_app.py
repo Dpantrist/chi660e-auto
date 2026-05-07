@@ -189,6 +189,7 @@ class Chi660eGuiApp:
             "gcd_number_of_segments",
             "gcd_repeat_count",
             "eis_after_gcd_rest_minutes",
+            "eis_after_gcd_interval_cycles",
             "eis_after_gcd_high_frequency_hz",
             "eis_after_gcd_low_frequency_hz",
             "eis_after_gcd_avg_cycles_0p1_to_1hz",
@@ -396,6 +397,7 @@ class Chi660eGuiApp:
             "eis_after_gcd_low_frequency_hz",
             "eis_after_gcd_avg_cycles_0p1_to_1hz",
             "eis_after_gcd_avg_cycles_0p01_to_0p1hz",
+            interval_cycles_field="eis_after_gcd_interval_cycles",
         )
         self._page_frames[PAGE_GLOBAL_SETTINGS] = self._build_global_page(container)
 
@@ -509,13 +511,18 @@ class Chi660eGuiApp:
         low_field: str,
         avg_cycles_0p1_to_1hz_field: str,
         avg_cycles_0p01_to_0p1hz_field: str,
+        interval_cycles_field: str | None = None,
     ) -> ttk.Frame:
         frame = ttk.Frame(parent)
         self._add_entry_row(frame, 0, "静置（分钟）", rest_field)
-        self._add_entry_row(frame, 1, "High Frequency (Hz)", high_field)
-        self._add_entry_row(frame, 2, "Low Frequency (Hz)", low_field)
-        self._add_entry_row(frame, 3, "0.1 - 1 Hz (cycles)", avg_cycles_0p1_to_1hz_field)
-        self._add_entry_row(frame, 4, "0.01 - 0.1 Hz (cycles)", avg_cycles_0p01_to_0p1hz_field)
+        next_row = 1
+        if interval_cycles_field is not None:
+            self._add_entry_row(frame, next_row, "EIS 间隔圈数", interval_cycles_field)
+            next_row += 1
+        self._add_entry_row(frame, next_row, "High Frequency (Hz)", high_field)
+        self._add_entry_row(frame, next_row + 1, "Low Frequency (Hz)", low_field)
+        self._add_entry_row(frame, next_row + 2, "0.1 - 1 Hz (cycles)", avg_cycles_0p1_to_1hz_field)
+        self._add_entry_row(frame, next_row + 3, "0.01 - 0.1 Hz (cycles)", avg_cycles_0p01_to_0p1hz_field)
         return frame
 
     def _build_cv_page(self, parent: ttk.Frame) -> ttk.Frame:

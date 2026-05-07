@@ -157,6 +157,7 @@ class WorkflowGuiState:
     gcd_repeat_count: str = "1"
 
     eis_after_gcd_rest_minutes: str = "10"
+    eis_after_gcd_interval_cycles: str = "1000"
     eis_after_gcd_high_frequency_hz: str = "1000000"
     eis_after_gcd_low_frequency_hz: str = "0.01"
     eis_after_gcd_avg_cycles_0p1_to_1hz: str = "1"
@@ -257,6 +258,7 @@ def build_default_gui_state() -> WorkflowGuiState:
         gcd_number_of_segments=str(gcd_config.number_of_segments),
         gcd_data_storage_interval_sec=str(gcd_config.data_storage_interval_sec),
         eis_after_gcd_rest_minutes=str(int(DEFAULT_REST_DURATION_SEC // 60)),
+        eis_after_gcd_interval_cycles="1000",
         eis_after_gcd_high_frequency_hz=str(eis_config.high_frequency_hz),
         eis_after_gcd_low_frequency_hz=str(eis_config.low_frequency_hz),
         eis_after_gcd_avg_cycles_0p1_to_1hz=str(eis_config.avg_cycles_0p1_to_1hz),
