@@ -13,5 +13,15 @@
     "recognition": "DirectHit",
     "action": "InputText",
     "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "EIS_InputAvgCycles_0p1_to_1Hz_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
+  },
+  "EIS_InputAvgCycles_0p01_to_0p1Hz_Apply": {
+    "recognition": "DirectHit",
+    "action": "InputText",
+    "input_text": "__INJECT_FROM_CONFIG__"
   }
 }

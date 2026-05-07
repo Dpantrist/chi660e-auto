@@ -172,12 +172,16 @@ class Chi660eGuiApp:
             "activation_sensitivity",
             "eis_after_activation_high_frequency_hz",
             "eis_after_activation_low_frequency_hz",
+            "eis_after_activation_avg_cycles_0p1_to_1hz",
+            "eis_after_activation_avg_cycles_0p01_to_0p1hz",
             "cv_high_e_v",
             "cv_sweep_segments",
             "cv_sensitivity",
             "eis_after_cv_rest_minutes",
             "eis_after_cv_high_frequency_hz",
             "eis_after_cv_low_frequency_hz",
+            "eis_after_cv_avg_cycles_0p1_to_1hz",
+            "eis_after_cv_avg_cycles_0p01_to_0p1hz",
             "gcd_area_cm2",
             "gcd_high_e_limit_v",
             "gcd_data_storage_interval_sec",
@@ -185,6 +189,8 @@ class Chi660eGuiApp:
             "eis_after_gcd_rest_minutes",
             "eis_after_gcd_high_frequency_hz",
             "eis_after_gcd_low_frequency_hz",
+            "eis_after_gcd_avg_cycles_0p1_to_1hz",
+            "eis_after_gcd_avg_cycles_0p01_to_0p1hz",
         ):
             self._field_vars[field_name] = self._new_string_var(str(getattr(self.state, field_name)))
 
@@ -368,6 +374,8 @@ class Chi660eGuiApp:
             container,
             "eis_after_activation_high_frequency_hz",
             "eis_after_activation_low_frequency_hz",
+            "eis_after_activation_avg_cycles_0p1_to_1hz",
+            "eis_after_activation_avg_cycles_0p01_to_0p1hz",
         )
         self._page_frames["cv_series"] = self._build_cv_page(container)
         self._page_frames["eis_after_cv"] = self._build_rest_eis_page(
@@ -375,6 +383,8 @@ class Chi660eGuiApp:
             "eis_after_cv_rest_minutes",
             "eis_after_cv_high_frequency_hz",
             "eis_after_cv_low_frequency_hz",
+            "eis_after_cv_avg_cycles_0p1_to_1hz",
+            "eis_after_cv_avg_cycles_0p01_to_0p1hz",
         )
         self._page_frames["gcd_series"] = self._build_gcd_page(container)
         self._page_frames["eis_after_gcd"] = self._build_rest_eis_page(
@@ -382,6 +392,8 @@ class Chi660eGuiApp:
             "eis_after_gcd_rest_minutes",
             "eis_after_gcd_high_frequency_hz",
             "eis_after_gcd_low_frequency_hz",
+            "eis_after_gcd_avg_cycles_0p1_to_1hz",
+            "eis_after_gcd_avg_cycles_0p01_to_0p1hz",
         )
         self._page_frames[PAGE_GLOBAL_SETTINGS] = self._build_global_page(container)
 
@@ -472,17 +484,36 @@ class Chi660eGuiApp:
         self._add_entry_row(frame, 2, "Sweep Segments", "activation_sweep_segments")
         return frame
 
-    def _build_eis_page(self, parent: ttk.Frame, high_field: str, low_field: str) -> ttk.Frame:
+    def _build_eis_page(
+        self,
+        parent: ttk.Frame,
+        high_field: str,
+        low_field: str,
+        avg_cycles_0p1_to_1hz_field: str,
+        avg_cycles_0p01_to_0p1hz_field: str,
+    ) -> ttk.Frame:
         frame = ttk.Frame(parent)
         self._add_entry_row(frame, 0, "High Frequency (Hz)", high_field)
         self._add_entry_row(frame, 1, "Low Frequency (Hz)", low_field)
+        self._add_entry_row(frame, 2, "0.1 - 1 Hz (cycles)", avg_cycles_0p1_to_1hz_field)
+        self._add_entry_row(frame, 3, "0.01 - 0.1 Hz (cycles)", avg_cycles_0p01_to_0p1hz_field)
         return frame
 
-    def _build_rest_eis_page(self, parent: ttk.Frame, rest_field: str, high_field: str, low_field: str) -> ttk.Frame:
+    def _build_rest_eis_page(
+        self,
+        parent: ttk.Frame,
+        rest_field: str,
+        high_field: str,
+        low_field: str,
+        avg_cycles_0p1_to_1hz_field: str,
+        avg_cycles_0p01_to_0p1hz_field: str,
+    ) -> ttk.Frame:
         frame = ttk.Frame(parent)
         self._add_entry_row(frame, 0, "静置（分钟）", rest_field)
         self._add_entry_row(frame, 1, "High Frequency (Hz)", high_field)
         self._add_entry_row(frame, 2, "Low Frequency (Hz)", low_field)
+        self._add_entry_row(frame, 3, "0.1 - 1 Hz (cycles)", avg_cycles_0p1_to_1hz_field)
+        self._add_entry_row(frame, 4, "0.01 - 0.1 Hz (cycles)", avg_cycles_0p01_to_0p1hz_field)
         return frame
 
     def _build_cv_page(self, parent: ttk.Frame) -> ttk.Frame:

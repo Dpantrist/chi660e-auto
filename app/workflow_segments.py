@@ -111,6 +111,8 @@ def build_eis_after_activation_segment(
         params={
             "high_frequency_hz": str(config.high_frequency_hz),
             "low_frequency_hz": str(config.low_frequency_hz),
+            "avg_cycles_0p1_to_1hz": str(config.avg_cycles_0p1_to_1hz),
+            "avg_cycles_0p01_to_0p1hz": str(config.avg_cycles_0p01_to_0p1hz),
         },
     )
 
@@ -162,6 +164,8 @@ def build_eis_after_cv_segment(
         params={
             "high_frequency_hz": str(config.high_frequency_hz),
             "low_frequency_hz": str(config.low_frequency_hz),
+            "avg_cycles_0p1_to_1hz": str(config.avg_cycles_0p1_to_1hz),
+            "avg_cycles_0p01_to_0p1hz": str(config.avg_cycles_0p01_to_0p1hz),
         },
     )
 
@@ -204,6 +208,8 @@ def build_eis_after_gcd_segment(
         params={
             "high_frequency_hz": str(config.high_frequency_hz),
             "low_frequency_hz": str(config.low_frequency_hz),
+            "avg_cycles_0p1_to_1hz": str(config.avg_cycles_0p1_to_1hz),
+            "avg_cycles_0p01_to_0p1hz": str(config.avg_cycles_0p01_to_0p1hz),
         },
     )
 
@@ -259,6 +265,8 @@ def build_eis_front_half_config_for_segment(segment: WorkflowSegment) -> EISFron
         return EISFrontHalfConfig(
             high_frequency_hz=str(segment.params["high_frequency_hz"]),
             low_frequency_hz=str(segment.params["low_frequency_hz"]),
+            avg_cycles_0p1_to_1hz=str(segment.params["avg_cycles_0p1_to_1hz"]),
+            avg_cycles_0p01_to_0p1hz=str(segment.params["avg_cycles_0p01_to_0p1hz"]),
         )
 
     raise NotImplementedError(

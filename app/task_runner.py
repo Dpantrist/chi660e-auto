@@ -2209,6 +2209,28 @@ def _run_eis_front_half_visual_form_once(
         "EIS_InputLowFrequency_Apply",
         config.low_frequency_hz,
     )
+    context.logger.info(
+        "EIS avg cycles 0.1 to 1 Hz input start/value=%s",
+        config.avg_cycles_0p1_to_1hz,
+    )
+    _emit_runtime_message(context, f"输入 0.1 - 1 Hz (cycles) {config.avg_cycles_0p1_to_1hz}")
+    _run_text_input_field(
+        context,
+        "EIS_FocusAvgCycles_0p1_to_1Hz",
+        "EIS_InputAvgCycles_0p1_to_1Hz_Apply",
+        config.avg_cycles_0p1_to_1hz,
+    )
+    context.logger.info(
+        "EIS avg cycles 0.01 to 0.1 Hz input start/value=%s",
+        config.avg_cycles_0p01_to_0p1hz,
+    )
+    _emit_runtime_message(context, f"输入 0.01 - 0.1 Hz (cycles) {config.avg_cycles_0p01_to_0p1hz}")
+    _run_text_input_field(
+        context,
+        "EIS_FocusAvgCycles_0p01_to_0p1Hz",
+        "EIS_InputAvgCycles_0p01_to_0p1Hz_Apply",
+        config.avg_cycles_0p01_to_0p1hz,
+    )
 
     _emit_runtime_message(context, "点击参数窗口 OK")
     ok_result = _run_visual_action_click(context, "EIS_ClickOK")

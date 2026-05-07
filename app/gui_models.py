@@ -122,6 +122,8 @@ class WorkflowGuiState:
 
     eis_after_activation_high_frequency_hz: str = "1000000"
     eis_after_activation_low_frequency_hz: str = "0.01"
+    eis_after_activation_avg_cycles_0p1_to_1hz: str = "1"
+    eis_after_activation_avg_cycles_0p01_to_0p1hz: str = "1"
 
     cv_high_e_v: str = "0.8"
     cv_scan_rates_mv: list[float] = field(default_factory=lambda: [float(item) for item in CV_SCAN_RATE_OPTIONS_MV])
@@ -135,6 +137,8 @@ class WorkflowGuiState:
     eis_after_cv_rest_minutes: str = "10"
     eis_after_cv_high_frequency_hz: str = "1000000"
     eis_after_cv_low_frequency_hz: str = "0.01"
+    eis_after_cv_avg_cycles_0p1_to_1hz: str = "1"
+    eis_after_cv_avg_cycles_0p01_to_0p1hz: str = "1"
 
     gcd_area_cm2: str = "1"
     gcd_current_densities_ma_cm2: list[float] = field(
@@ -153,6 +157,8 @@ class WorkflowGuiState:
     eis_after_gcd_rest_minutes: str = "10"
     eis_after_gcd_high_frequency_hz: str = "1000000"
     eis_after_gcd_low_frequency_hz: str = "0.01"
+    eis_after_gcd_avg_cycles_0p1_to_1hz: str = "1"
+    eis_after_gcd_avg_cycles_0p01_to_0p1hz: str = "1"
 
     task_order: list[str] = field(default_factory=lambda: list(TASK_BUCKET_ORDER))
 
@@ -228,6 +234,8 @@ def build_default_gui_state() -> WorkflowGuiState:
         activation_sensitivity=str(activation_params["sensitivity"]),
         eis_after_activation_high_frequency_hz=str(eis_config.high_frequency_hz),
         eis_after_activation_low_frequency_hz=str(eis_config.low_frequency_hz),
+        eis_after_activation_avg_cycles_0p1_to_1hz=str(eis_config.avg_cycles_0p1_to_1hz),
+        eis_after_activation_avg_cycles_0p01_to_0p1hz=str(eis_config.avg_cycles_0p01_to_0p1hz),
         cv_high_e_v=str(activation_params["high_potential"]),
         cv_scan_rates_mv=[float(item) for item in CV_SCAN_RATE_OPTIONS_MV],
         cv_scan_rate_entry_values_mv=_default_cv_scan_rate_entry_values_mv(),
@@ -237,6 +245,8 @@ def build_default_gui_state() -> WorkflowGuiState:
         eis_after_cv_rest_minutes=str(int(DEFAULT_REST_DURATION_SEC // 60)),
         eis_after_cv_high_frequency_hz=str(eis_config.high_frequency_hz),
         eis_after_cv_low_frequency_hz=str(eis_config.low_frequency_hz),
+        eis_after_cv_avg_cycles_0p1_to_1hz=str(eis_config.avg_cycles_0p1_to_1hz),
+        eis_after_cv_avg_cycles_0p01_to_0p1hz=str(eis_config.avg_cycles_0p01_to_0p1hz),
         gcd_area_cm2=_format_plain_number(gcd_config.electrode_area_cm2),
         gcd_current_densities_ma_cm2=[float(item) for item in gcd_config.current_density_ma_cm2_list],
         gcd_current_density_entry_values_ma_cm2=_default_gcd_current_density_entry_values_ma_cm2(),
@@ -247,4 +257,6 @@ def build_default_gui_state() -> WorkflowGuiState:
         eis_after_gcd_rest_minutes=str(int(DEFAULT_REST_DURATION_SEC // 60)),
         eis_after_gcd_high_frequency_hz=str(eis_config.high_frequency_hz),
         eis_after_gcd_low_frequency_hz=str(eis_config.low_frequency_hz),
+        eis_after_gcd_avg_cycles_0p1_to_1hz=str(eis_config.avg_cycles_0p1_to_1hz),
+        eis_after_gcd_avg_cycles_0p01_to_0p1hz=str(eis_config.avg_cycles_0p01_to_0p1hz),
     )

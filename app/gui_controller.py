@@ -158,6 +158,8 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
                     config=EISFrontHalfConfig(
                         high_frequency_hz=state.eis_after_activation_high_frequency_hz.strip(),
                         low_frequency_hz=state.eis_after_activation_low_frequency_hz.strip(),
+                        avg_cycles_0p1_to_1hz=state.eis_after_activation_avg_cycles_0p1_to_1hz.strip(),
+                        avg_cycles_0p01_to_0p1hz=state.eis_after_activation_avg_cycles_0p01_to_0p1hz.strip(),
                     ),
                 )
             )
@@ -187,12 +189,14 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
             segments.append(rest_segment)
             order += 1
 
-            segment = build_eis_after_cv_segment(order=order)
-            segment.params.update(
-                {
-                    "high_frequency_hz": state.eis_after_cv_high_frequency_hz.strip(),
-                    "low_frequency_hz": state.eis_after_cv_low_frequency_hz.strip(),
-                }
+            segment = build_eis_after_cv_segment(
+                order=order,
+                config=EISFrontHalfConfig(
+                    high_frequency_hz=state.eis_after_cv_high_frequency_hz.strip(),
+                    low_frequency_hz=state.eis_after_cv_low_frequency_hz.strip(),
+                    avg_cycles_0p1_to_1hz=state.eis_after_cv_avg_cycles_0p1_to_1hz.strip(),
+                    avg_cycles_0p01_to_0p1hz=state.eis_after_cv_avg_cycles_0p01_to_0p1hz.strip(),
+                ),
             )
             segments.append(segment)
             order += 1
@@ -224,12 +228,14 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
             segments.append(rest_segment)
             order += 1
 
-            segment = build_eis_after_gcd_segment(order=order)
-            segment.params.update(
-                {
-                    "high_frequency_hz": state.eis_after_gcd_high_frequency_hz.strip(),
-                    "low_frequency_hz": state.eis_after_gcd_low_frequency_hz.strip(),
-                }
+            segment = build_eis_after_gcd_segment(
+                order=order,
+                config=EISFrontHalfConfig(
+                    high_frequency_hz=state.eis_after_gcd_high_frequency_hz.strip(),
+                    low_frequency_hz=state.eis_after_gcd_low_frequency_hz.strip(),
+                    avg_cycles_0p1_to_1hz=state.eis_after_gcd_avg_cycles_0p1_to_1hz.strip(),
+                    avg_cycles_0p01_to_0p1hz=state.eis_after_gcd_avg_cycles_0p01_to_0p1hz.strip(),
+                ),
             )
             segments.append(segment)
             order += 1
