@@ -79,6 +79,19 @@ def _parse_int(text: str, field_name: str) -> int:
     return int(float(stripped))
 
 
+def _parse_positive_int(text: str, field_name: str) -> int:
+    stripped = str(text).strip()
+    if not stripped:
+        raise ValueError(f"{field_name} 不能为空。")
+    try:
+        value = int(stripped)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} 必须为正整数。") from exc
+    if value < 1:
+        raise ValueError(f"{field_name} 必须大于等于 1。")
+    return value
+
+
 def _minutes_to_seconds(text: str, field_name: str) -> int:
     minutes = _parse_float(text, field_name)
     return max(0, int(minutes * 60))
@@ -205,6 +218,7 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
         if bucket == "gcd_series" and state.enable_gcd_series:
             electrode_area_cm2 = _parse_float(state.gcd_area_cm2, "GCD 面积")
             high_e_limit_v = _parse_float(state.gcd_high_e_limit_v, "GCD High E limit")
+            repeat_count = _parse_positive_int(state.gcd_repeat_count, "GCD 循环次数")
             for density in _resolve_selected_gcd_current_densities_ma_cm2(state):
                 segments.append(
                     build_gcd_series_item_segment(
@@ -214,6 +228,7 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
                         high_e_limit_mv=high_e_limit_v * 1000.0,
                         data_storage_interval_sec=state.gcd_data_storage_interval_sec.strip(),
                         number_of_segments=state.gcd_number_of_segments.strip(),
+                        repeat_count=repeat_count,
                     )
                 )
                 order += 1

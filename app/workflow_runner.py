@@ -171,6 +171,13 @@ def _raise_workflow_validation_error(issues: list[dict[str, Any]]) -> None:
     raise Chi660eAutoError(f"Workflow contains non-runnable segments: {summary}")
 
 
+def _build_repeat_output_name(file_name: str, repeat_index: int) -> str:
+    path = Path(file_name)
+    suffix = path.suffix or ".txt"
+    stem = path.stem if path.suffix else file_name
+    return f"{stem}-{repeat_index}{suffix}"
+
+
 def _run_segment(
     context: RuntimeContext,
     segment: WorkflowSegment,
@@ -244,33 +251,96 @@ def _run_segment(
         output_name = build_output_filename_for_segment(segment)
         if output_name is None:
             raise RuntimeError(f"Missing output filename for segment {segment.segment_id!r}.")
+        repeat_count = int(segment.params.get("repeat_count", 1))
+        if repeat_count < 1:
+            raise Chi660eAutoError(f"GCD repeat_count must be >= 1: {repeat_count}")
 
         context.logger.info(
-            "Workflow GCD run values: density=%s cathodic=%s anodic=%s high_e=%s",
+            "Workflow GCD run values: density=%s cathodic=%s anodic=%s high_e=%s repeat_count=%s",
             gcd_run_values["density_label_text"],
             gcd_run_values["cathodic_current_a_text"],
             gcd_run_values["anodic_current_a_text"],
             gcd_run_values["high_e_limit_v_text"],
+            repeat_count,
         )
 
-        run_gcd_front_half_on_context(context, gcd_run_values)
-        _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
-        post_run_result = run_post_run_public_flow(
-            context,
-            save_directory=save_directory,
-            file_name=output_name,
-        )
-        _append_workflow_event(
-            context,
-            "workflow_segment_saved",
-            {
-                "segment_id": segment.segment_id,
-                "display_name": segment.display_name,
-                "density": gcd_run_values["density_label_text"],
-                "file_path": post_run_result["save"]["file_path"],
-                "run_poll_count": post_run_result["run_finish"]["poll_count"],
-            },
-        )
+        for repeat_index in range(1, repeat_count + 1):
+            repeat_output_name = (
+                output_name if repeat_count == 1 else _build_repeat_output_name(output_name, repeat_index)
+            )
+            run_front_half = repeat_index == 1
+            context.logger.info(
+                "Workflow GCD repeat start: density=%s repeat_index=%s repeat_count=%s file_name=%s run_front_half=%s",
+                gcd_run_values["density_label_text"],
+                repeat_index,
+                repeat_count,
+                repeat_output_name,
+                run_front_half,
+            )
+            _append_workflow_event(
+                context,
+                "workflow_gcd_repeat_start",
+                {
+                    "segment_id": segment.segment_id,
+                    "display_name": segment.display_name,
+                    "density": gcd_run_values["density_label_text"],
+                    "repeat_index": repeat_index,
+                    "repeat_count": repeat_count,
+                    "file_name": repeat_output_name,
+                    "run_front_half": run_front_half,
+                },
+            )
+
+            if run_front_half:
+                run_gcd_front_half_on_context(context, gcd_run_values)
+                _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
+            else:
+                context.logger.info(
+                    "GCD repeat skip front-half: density=%s repeat=%s/%s",
+                    gcd_run_values["density_label_text"],
+                    repeat_index,
+                    repeat_count,
+                )
+                _append_workflow_event(
+                    context,
+                    "workflow_gcd_repeat_front_half_skipped",
+                    {
+                        "segment_id": segment.segment_id,
+                        "display_name": segment.display_name,
+                        "density": gcd_run_values["density_label_text"],
+                        "repeat_index": repeat_index,
+                        "repeat_count": repeat_count,
+                        "file_name": repeat_output_name,
+                    },
+                )
+                _raise_if_stop_requested(context, f"segment_skip_front_half:{segment.display_name}")
+
+            post_run_result = run_post_run_public_flow(
+                context,
+                save_directory=save_directory,
+                file_name=repeat_output_name,
+            )
+            _append_workflow_event(
+                context,
+                "workflow_segment_saved",
+                {
+                    "segment_id": segment.segment_id,
+                    "display_name": segment.display_name,
+                    "density": gcd_run_values["density_label_text"],
+                    "repeat_index": repeat_index,
+                    "repeat_count": repeat_count,
+                    "file_name": repeat_output_name,
+                    "file_path": post_run_result["save"]["file_path"],
+                    "run_poll_count": post_run_result["run_finish"]["poll_count"],
+                },
+            )
+            context.logger.info(
+                "Workflow GCD repeat completed: density=%s repeat_index=%s repeat_count=%s file_name=%s",
+                gcd_run_values["density_label_text"],
+                repeat_index,
+                repeat_count,
+                repeat_output_name,
+            )
         return
 
     if segment_is_rest(segment):

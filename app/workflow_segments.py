@@ -177,6 +177,7 @@ def build_gcd_series_item_segment(
     high_e_limit_mv: float = DEFAULT_GCD_HIGH_E_LIMIT_MV,
     data_storage_interval_sec: str = DEFAULT_GCD_DATA_STORAGE_INTERVAL_SEC,
     number_of_segments: str = DEFAULT_GCD_NUMBER_OF_SEGMENTS,
+    repeat_count: int = 1,
 ) -> WorkflowSegment:
     return WorkflowSegment(
         segment_id=f"gcd_{current_density_ma_cm2}",
@@ -190,6 +191,7 @@ def build_gcd_series_item_segment(
             "high_e_limit_mv": float(high_e_limit_mv),
             "data_storage_interval_sec": str(data_storage_interval_sec),
             "number_of_segments": str(number_of_segments),
+            "repeat_count": int(repeat_count),
         },
     )
 

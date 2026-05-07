@@ -153,6 +153,7 @@ class WorkflowGuiState:
     gcd_high_e_limit_v: str = "0.8"
     gcd_number_of_segments: str = "11"
     gcd_data_storage_interval_sec: str = "0.001"
+    gcd_repeat_count: str = "1"
 
     eis_after_gcd_rest_minutes: str = "10"
     eis_after_gcd_high_frequency_hz: str = "1000000"

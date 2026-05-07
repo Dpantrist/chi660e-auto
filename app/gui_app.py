@@ -186,6 +186,7 @@ class Chi660eGuiApp:
             "gcd_high_e_limit_v",
             "gcd_data_storage_interval_sec",
             "gcd_number_of_segments",
+            "gcd_repeat_count",
             "eis_after_gcd_rest_minutes",
             "eis_after_gcd_high_frequency_hz",
             "eis_after_gcd_low_frequency_hz",
@@ -544,6 +545,7 @@ class Chi660eGuiApp:
         self._add_entry_row(frame, 3, "High E limit (V)", "gcd_high_e_limit_v")
         self._add_entry_row(frame, 4, "Data Storage Intvl (sec)", "gcd_data_storage_interval_sec")
         self._add_entry_row(frame, 5, "Number of Segments", "gcd_number_of_segments")
+        self._add_entry_row(frame, 6, "循环次数", "gcd_repeat_count")
         return frame
 
     def _build_global_page(self, parent: ttk.Frame) -> ttk.Frame:
