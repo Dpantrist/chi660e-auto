@@ -12,6 +12,7 @@ from typing import Any
 
 from app.bootstrap import bootstrap_app
 from app.errors import Chi660eAutoError
+from app.naming_rules import build_cv_filename
 from app.post_run_flow import run_post_run_public_flow
 from app.run_control import RunControl, RunStopRequested, sleep_with_run_control
 from app.replay_manager import append_event, finalize_session
@@ -178,6 +179,20 @@ def _build_repeat_output_name(file_name: str, repeat_index: int) -> str:
     return f"{stem}-{repeat_index}{suffix}"
 
 
+def _compute_cv_cycles_per_run(sweep_segments: Any) -> int:
+    try:
+        segment_count = int(str(sweep_segments).strip())
+    except (TypeError, ValueError) as exc:
+        raise Chi660eAutoError(f"CV Sweep Segments must be a positive integer: {sweep_segments}") from exc
+    if segment_count <= 0:
+        raise Chi660eAutoError(f"CV Sweep Segments must be greater than 0: {segment_count}")
+
+    cycles = (segment_count - 1) // 2 if segment_count % 2 else segment_count // 2
+    if cycles < 1:
+        raise Chi660eAutoError(f"CV Sweep Segments must represent at least 1 cycle: {segment_count}")
+    return cycles
+
+
 def _compute_gcd_cycles_per_run(number_of_segments: Any) -> int:
     try:
         segment_count = int(str(number_of_segments).strip())
@@ -202,6 +217,85 @@ def _build_eis_after_gcd_cycles_filename(
         density_part = f" {density_part}"
     final_part = " final" if final else ""
     return f"EIS-after GCD{density_part}{final_part} {int(cycles)} cycles.txt"
+
+
+def _build_eis_after_cv_cycles_filename(
+    scan_rate_mv: Any,
+    cycles: int,
+    final: bool = False,
+) -> str:
+    scan_rate_part = Path(build_cv_filename(scan_rate_mv)).stem
+    if scan_rate_part.lower().startswith("cv "):
+        scan_rate_part = scan_rate_part[3:]
+    scan_rate_part = scan_rate_part.strip().replace("/", "_").replace("\\", "_").replace(":", "_")
+    if scan_rate_part:
+        scan_rate_part = f" {scan_rate_part}"
+    final_part = " final" if final else ""
+    return f"EIS-after CV{scan_rate_part}{final_part} {int(cycles)} cycles.txt"
+
+
+def _run_eis_after_cv_cycles(
+    context: RuntimeContext,
+    segment: WorkflowSegment,
+    save_directory: str | Path,
+    *,
+    scan_rate_mv: Any,
+    trigger_cycles: int,
+    current_cycles: int,
+    interval_cycles: int,
+    final: bool,
+) -> None:
+    eis_config = build_eis_front_half_config_for_segment(segment)
+    output_name = _build_eis_after_cv_cycles_filename(scan_rate_mv, current_cycles, final=final)
+    context.logger.info(
+        "Workflow EIS-after-CV trigger: scan_rate_mv=%s trigger_cycles=%s current_cycles=%s interval_cycles=%s file_name=%s final=%s",
+        scan_rate_mv,
+        trigger_cycles,
+        current_cycles,
+        interval_cycles,
+        output_name,
+        final,
+    )
+    _append_workflow_event(
+        context,
+        "workflow_eis_after_cv_triggered",
+        {
+            "segment_id": segment.segment_id,
+            "display_name": segment.display_name,
+            "scan_rate_mv": scan_rate_mv,
+            "trigger_cycles": trigger_cycles,
+            "current_cycles": current_cycles,
+            "interval_cycles": interval_cycles,
+            "file_name": output_name,
+            "final": final,
+        },
+    )
+
+    run_eis_front_half_on_context(context, eis_config)
+    _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
+    post_run_result = run_post_run_public_flow(
+        context,
+        save_directory=save_directory,
+        file_name=output_name,
+        double_click_main_center_after_run=True,
+        double_click_main_center_delay_sec=10.0,
+    )
+    _append_workflow_event(
+        context,
+        "workflow_segment_saved",
+        {
+            "segment_id": segment.segment_id,
+            "display_name": segment.display_name,
+            "scan_rate_mv": scan_rate_mv,
+            "trigger_cycles": trigger_cycles,
+            "current_cycles": current_cycles,
+            "interval_cycles": interval_cycles,
+            "file_name": output_name,
+            "file_path": post_run_result["save"]["file_path"],
+            "run_poll_count": post_run_result["run_finish"]["poll_count"],
+            "final": final,
+        },
+    )
 
 
 def _run_eis_after_gcd_cycles(
@@ -273,6 +367,7 @@ def _run_segment(
     save_directory: str | Path,
     runtime_key: str,
     eis_after_gcd_segment: WorkflowSegment | None = None,
+    eis_after_cv_segment: WorkflowSegment | None = None,
 ) -> None:
     _raise_if_stop_requested(context, f"segment_start:{segment.display_name}")
     if not segment_is_runnable(segment):
@@ -313,19 +408,35 @@ def _run_segment(
         repeat_count = int(segment.params.get("repeat_count", 1))
         if repeat_count < 1:
             raise Chi660eAutoError(f"CV repeat_count must be >= 1: {repeat_count}")
+        cv_cycles_per_run = _compute_cv_cycles_per_run(segment.params["sweep_segments"])
+        total_cycles = cv_cycles_per_run * repeat_count
+        interval_cycles = 1000
+        next_eis_at = interval_cycles
+        last_eis_after_cycles = 0
+        if eis_after_cv_segment is not None:
+            try:
+                interval_cycles = int(eis_after_cv_segment.params.get("interval_cycles", 1000))
+            except (TypeError, ValueError) as exc:
+                raise Chi660eAutoError("EIS-after-CV 间隔圈数必须为正整数。") from exc
+            if interval_cycles < 1:
+                raise Chi660eAutoError("EIS-after-CV 间隔圈数必须为正整数。")
+            next_eis_at = interval_cycles
 
         scan_rate_mv = segment.params.get("scan_rate_mv")
         context.logger.info(
-            "Workflow CV run values: scan_rate_mv=%s repeat_count=%s",
+            "Workflow CV run values: scan_rate_mv=%s repeat_count=%s cv_cycles_per_run=%s total_cycles=%s",
             scan_rate_mv,
             repeat_count,
+            cv_cycles_per_run,
+            total_cycles,
         )
 
+        force_cv_front_half = False
         for repeat_index in range(1, repeat_count + 1):
             repeat_output_name = (
                 output_name if repeat_count == 1 else _build_repeat_output_name(output_name, repeat_index)
             )
-            run_front_half = repeat_index == 1
+            run_front_half = repeat_index == 1 or force_cv_front_half
             context.logger.info(
                 "Workflow CV repeat start: scan_rate_mv=%s repeat_index=%s repeat_count=%s file_name=%s run_front_half=%s",
                 scan_rate_mv,
@@ -350,6 +461,7 @@ def _run_segment(
 
             if run_front_half:
                 run_cv_front_half_on_context(context, cv_config)
+                force_cv_front_half = False
                 _raise_if_stop_requested(context, f"segment_after_front_half:{segment.display_name}")
             else:
                 context.logger.info(
@@ -391,12 +503,63 @@ def _run_segment(
                     "run_poll_count": post_run_result["run_finish"]["poll_count"],
                 },
             )
+            current_cycles = cv_cycles_per_run * repeat_index
+            context.logger.info(
+                "Workflow CV cycles: scan_rate_mv=%s repeat_index=%s repeat_count=%s current_cycles=%s total_cycles=%s cv_cycles_per_run=%s",
+                scan_rate_mv,
+                repeat_index,
+                repeat_count,
+                current_cycles,
+                total_cycles,
+                cv_cycles_per_run,
+            )
+            _append_workflow_event(
+                context,
+                "workflow_cv_cycles_updated",
+                {
+                    "segment_id": segment.segment_id,
+                    "display_name": segment.display_name,
+                    "scan_rate_mv": scan_rate_mv,
+                    "repeat_index": repeat_index,
+                    "repeat_count": repeat_count,
+                    "current_cycles": current_cycles,
+                    "total_cycles": total_cycles,
+                    "cv_cycles_per_run": cv_cycles_per_run,
+                },
+            )
+            if eis_after_cv_segment is not None and current_cycles >= next_eis_at:
+                trigger_cycles = next_eis_at
+                _run_eis_after_cv_cycles(
+                    context,
+                    eis_after_cv_segment,
+                    save_directory,
+                    scan_rate_mv=scan_rate_mv,
+                    trigger_cycles=trigger_cycles,
+                    current_cycles=current_cycles,
+                    interval_cycles=interval_cycles,
+                    final=False,
+                )
+                last_eis_after_cycles = current_cycles
+                force_cv_front_half = True
+                while next_eis_at <= current_cycles:
+                    next_eis_at += interval_cycles
             context.logger.info(
                 "Workflow CV repeat completed: scan_rate_mv=%s repeat_index=%s repeat_count=%s file_name=%s",
                 scan_rate_mv,
                 repeat_index,
                 repeat_count,
                 repeat_output_name,
+            )
+        if eis_after_cv_segment is not None and last_eis_after_cycles < total_cycles:
+            _run_eis_after_cv_cycles(
+                context,
+                eis_after_cv_segment,
+                save_directory,
+                scan_rate_mv=scan_rate_mv,
+                trigger_cycles=total_cycles,
+                current_cycles=total_cycles,
+                interval_cycles=interval_cycles,
+                final=True,
             )
         return
 
@@ -614,6 +777,14 @@ def run_workflow_segments(
     ordered_segments = sort_enabled_segments(segments)
     issues = validate_workflow_segments(ordered_segments)
     _raise_workflow_validation_error(issues)
+    inline_eis_after_cv_segment = next(
+        (
+            segment
+            for segment in ordered_segments
+            if segment.segment_type == WorkflowSegmentType.EIS_AFTER_CV
+        ),
+        None,
+    )
     inline_eis_after_gcd_segment = next(
         (
             segment
@@ -622,8 +793,17 @@ def run_workflow_segments(
         ),
         None,
     )
+    has_cv_series = any(segment.segment_type == WorkflowSegmentType.CV_SERIES_ITEM for segment in ordered_segments)
     has_gcd_series = any(segment.segment_type == WorkflowSegmentType.GCD_SERIES_ITEM for segment in ordered_segments)
     skip_segment_indices: set[int] = set()
+    cv_skip_segment_indices: set[int] = set()
+    if inline_eis_after_cv_segment is not None and has_cv_series:
+        eis_index = ordered_segments.index(inline_eis_after_cv_segment)
+        skip_segment_indices.add(eis_index)
+        cv_skip_segment_indices.add(eis_index)
+        if eis_index > 0 and ordered_segments[eis_index - 1].segment_type == WorkflowSegmentType.REST:
+            skip_segment_indices.add(eis_index - 1)
+            cv_skip_segment_indices.add(eis_index - 1)
     if inline_eis_after_gcd_segment is not None and has_gcd_series:
         eis_index = ordered_segments.index(inline_eis_after_gcd_segment)
         skip_segment_indices.add(eis_index)
@@ -639,6 +819,26 @@ def run_workflow_segments(
         for index, segment in enumerate(ordered_segments, start=1):
             segment_index = index - 1
             if segment_index in skip_segment_indices:
+                if segment_index in cv_skip_segment_indices:
+                    runtime_context.logger.info(
+                        "Workflow segment consumed by CV loop: index=%s/%s type=%s name=%s",
+                        index,
+                        len(ordered_segments),
+                        segment.segment_type.value,
+                        segment.display_name,
+                    )
+                    _append_workflow_event(
+                        runtime_context,
+                        "workflow_segment_consumed_by_cv_loop",
+                        {
+                            "index": index,
+                            "total": len(ordered_segments),
+                            "segment_id": segment.segment_id,
+                            "segment_type": segment.segment_type.value,
+                            "display_name": segment.display_name,
+                        },
+                    )
+                    continue
                 runtime_context.logger.info(
                     "Workflow segment consumed by GCD loop: index=%s/%s type=%s name=%s",
                     index,
@@ -702,6 +902,12 @@ def run_workflow_segments(
                 segment,
                 save_directory,
                 current_runtime_key,
+                eis_after_cv_segment=(
+                    inline_eis_after_cv_segment
+                    if segment.segment_type == WorkflowSegmentType.CV_SERIES_ITEM
+                    and segment_index not in skip_segment_indices
+                    else None
+                ),
                 eis_after_gcd_segment=(
                     inline_eis_after_gcd_segment
                     if segment.segment_type == WorkflowSegmentType.GCD_SERIES_ITEM

@@ -179,6 +179,7 @@ class Chi660eGuiApp:
             "cv_repeat_count",
             "cv_sensitivity",
             "eis_after_cv_rest_minutes",
+            "eis_after_cv_interval_cycles",
             "eis_after_cv_high_frequency_hz",
             "eis_after_cv_low_frequency_hz",
             "eis_after_cv_avg_cycles_0p1_to_1hz",
@@ -388,6 +389,7 @@ class Chi660eGuiApp:
             "eis_after_cv_low_frequency_hz",
             "eis_after_cv_avg_cycles_0p1_to_1hz",
             "eis_after_cv_avg_cycles_0p01_to_0p1hz",
+            interval_cycles_field="eis_after_cv_interval_cycles",
         )
         self._page_frames["gcd_series"] = self._build_gcd_page(container)
         self._page_frames["eis_after_gcd"] = self._build_rest_eis_page(

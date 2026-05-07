@@ -136,6 +136,7 @@ class WorkflowGuiState:
     cv_sensitivity: str = "1.e-003"
 
     eis_after_cv_rest_minutes: str = "10"
+    eis_after_cv_interval_cycles: str = "1000"
     eis_after_cv_high_frequency_hz: str = "1000000"
     eis_after_cv_low_frequency_hz: str = "0.01"
     eis_after_cv_avg_cycles_0p1_to_1hz: str = "1"
@@ -246,6 +247,7 @@ def build_default_gui_state() -> WorkflowGuiState:
         cv_sweep_segments=str(activation_params["sweep_segments"]),
         cv_sensitivity=str(activation_params["sensitivity"]),
         eis_after_cv_rest_minutes=str(int(DEFAULT_REST_DURATION_SEC // 60)),
+        eis_after_cv_interval_cycles="1000",
         eis_after_cv_high_frequency_hz=str(eis_config.high_frequency_hz),
         eis_after_cv_low_frequency_hz=str(eis_config.low_frequency_hz),
         eis_after_cv_avg_cycles_0p1_to_1hz=str(eis_config.avg_cycles_0p1_to_1hz),

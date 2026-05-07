@@ -196,6 +196,10 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
             continue
 
         if bucket == "eis_after_cv" and state.enable_eis_after_cv:
+            interval_cycles = _parse_positive_int(
+                state.eis_after_cv_interval_cycles,
+                "EIS-after-CV 间隔圈数",
+            )
             rest_segment = build_rest_segment(
                 order=order,
                 duration_sec=_minutes_to_seconds(state.eis_after_cv_rest_minutes, "EIS-after cv 静置"),
@@ -212,6 +216,7 @@ def build_segments_from_gui_state(state: WorkflowGuiState) -> list[WorkflowSegme
                     avg_cycles_0p1_to_1hz=state.eis_after_cv_avg_cycles_0p1_to_1hz.strip(),
                     avg_cycles_0p01_to_0p1hz=state.eis_after_cv_avg_cycles_0p01_to_0p1hz.strip(),
                 ),
+                interval_cycles=interval_cycles,
             )
             segments.append(segment)
             order += 1

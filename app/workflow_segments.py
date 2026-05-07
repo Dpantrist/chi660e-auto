@@ -155,6 +155,7 @@ def build_rest_segment(order: int, duration_sec: int = DEFAULT_REST_DURATION_SEC
 def build_eis_after_cv_segment(
     order: int,
     config: EISFrontHalfConfig | None = None,
+    interval_cycles: int = 1000,
 ) -> WorkflowSegment:
     config = config or get_default_eis_front_half_config()
     return WorkflowSegment(
@@ -168,6 +169,7 @@ def build_eis_after_cv_segment(
             "low_frequency_hz": str(config.low_frequency_hz),
             "avg_cycles_0p1_to_1hz": str(config.avg_cycles_0p1_to_1hz),
             "avg_cycles_0p01_to_0p1hz": str(config.avg_cycles_0p01_to_0p1hz),
+            "interval_cycles": int(interval_cycles),
         },
     )
 

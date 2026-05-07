@@ -48,6 +48,7 @@ class WorkflowPlanTestCase(unittest.TestCase):
         self.assertEqual(validate_workflow_segments([segment]), [])
         self.assertEqual(segment.params["high_frequency_hz"], "1000000")
         self.assertEqual(segment.params["low_frequency_hz"], "0.01")
+        self.assertEqual(segment.params["interval_cycles"], 1000)
         self.assertEqual(build_output_filename_for_segment(segment), "EIS-after cv.txt")
 
     def test_eis_after_gcd_segment_is_valid(self) -> None:
@@ -109,6 +110,22 @@ class WorkflowPlanTestCase(unittest.TestCase):
 
         self.assertEqual(len(cv_segments), 1)
         self.assertEqual(cv_segments[0].params["scan_rate_mv"], 7.0)
+
+    def test_eis_after_cv_interval_value_is_used_in_segment(self) -> None:
+        state = build_default_gui_state()
+        state.enable_activation_cv = False
+        state.enable_eis_after_activation = False
+        state.enable_cv_series = False
+        state.enable_eis_after_cv = True
+        state.enable_gcd_series = False
+        state.enable_eis_after_gcd = False
+        state.eis_after_cv_interval_cycles = "12"
+
+        segments = build_segments_from_gui_state(state)
+        eis_segments = [segment for segment in segments if segment.segment_id == "eis_after_cv"]
+
+        self.assertEqual(len(eis_segments), 1)
+        self.assertEqual(eis_segments[0].params["interval_cycles"], 12)
 
     def test_gcd_editable_density_value_is_used_in_segments(self) -> None:
         state = build_default_gui_state()
